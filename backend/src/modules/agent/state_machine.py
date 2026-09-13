@@ -39,7 +39,7 @@ try:
     LLM_AVAILABLE = True
 except ImportError:
     LLM_AVAILABLE = False
-    logger.warning("[WARN] LangChain not available, using mock mode")
+    logger.warning("[WARN] LangChain not available, using fallback mode")
 
 
 # 初始化 LLM 客户端（支持多种 Provider）
@@ -80,7 +80,7 @@ def create_llm(provider="auto", api_key=None, base_url=None):
                 max_tokens=4096
             )
         
-        logger.warning("No API key found, using mock mode")
+        logger.warning("No API key found, using fallback mode")
         return None
     
     elif provider == "deepseek":
@@ -159,7 +159,7 @@ if llm is None:
     logger.warning("  - DEEPSEEK_API_KEY (recommended - fast & cheap)")
     logger.warning("  - OPENAI_API_KEY")
     logger.warning("")
-    logger.warning("Current setup will fall back to Mock mode.")
+    logger.warning("LLM not configured; running in fallback mode.")
     logger.warning("=" * 50)
 
 
@@ -178,13 +178,13 @@ class ExplanationEngine:
     
     def __init__(self, config: Dict[str, Any]):
         self.config = config
-        self.use_mock = llm is None or not LLM_AVAILABLE
+        self.use_fallback = llm is None or not LLM_AVAILABLE
         
     async def generate(self, topic: str, context: dict) -> str:
         """生成讲解内容（使用 OpenAI LLM）"""
-        if self.use_mock:
-            # Mock 模式（降级方案）
-            return self._generate_mock_explanation(topic, context)
+        if self.use_fallback:
+            # 降级模式
+            return self._generate_fallback_explanation(topic, context)
         
         try:
             # 真实 LLM 模式
@@ -210,7 +210,7 @@ class ExplanationEngine:
             
         except Exception as e:
             print(f"❌ LLM generation failed: {e}")
-            return self._generate_mock_explanation(topic, context)
+            return self._generate_fallback_explanation(topic, context)
     
     def strip_formatting(self, text: str) -> str:
         """移除 Markdown 格式用于 LLM 调用"""
@@ -219,8 +219,8 @@ class ExplanationEngine:
         text = re.sub(r'\*\*|\`{3}', '', text)
         return text.strip()
     
-    def _generate_mock_explanation(self, topic: str, context: dict) -> str:
-        """降级方案：生成 Mock 讲解内容（当 LLM 不可用时）"""
+    def _generate_fallback_explanation(self, topic: str, context: dict) -> str:
+        """降级方案：生成内置示例讲解内容（当 LLM 不可用时）"""
         depth_indicators = {
             "surface": ["基本概念:", "快速了解:"],
             "medium": ["核心原理:", "深入分析:"],
@@ -265,8 +265,8 @@ class QuizFactory:
         self.num_questions = config.get("num_questions", 3)
     
     def generate(self, topic: str, core_concepts: list) -> list:
-        """生成 mock 测验题目"""
-        mock_quiz = [
+        """生成降级测验题目"""
+        fallback_quiz = [
             {
                 "question": f"{topic} 的核心优势是什么？",
                 "options": [
@@ -286,7 +286,7 @@ class QuizFactory:
             }
         ]
         
-        return mock_quiz[:self.num_questions]
+        return fallback_quiz[:self.num_questions]
     
     def evaluate(self, user_answers: list[int], correct_answers: list[int]) -> tuple[float, list[str]]:
         """评估测验结果"""

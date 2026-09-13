@@ -141,7 +141,7 @@ class MemoryManager:
             asyncio.run(self._store_user_profile_vector_async(current))
     
     async def _store_user_profile_vector_async(self, profile: dict):
-        """将用户画像存储到向量数据库（真实向量优先，Mock 仅作紧急降级）"""
+        """将用户画像存储到向量数据库（真实向量优先，占位向量仅作紧急降级）"""
         import hashlib
 
         # Qdrant 要求 ID 是整数或 UUID，使用 MD5 生成唯一整数 ID
@@ -162,14 +162,14 @@ class MemoryManager:
             self.qdrant_client.upsert(collection_name="user_profiles", points=[point])
             return
 
-        # 紧急降级：真实向量不可用时才使用 Mock（维度需与 collection 一致）
-        print("⚠️  Using Mock vector for user profile (emergency fallback)")
+        # 紧急降级：真实向量不可用时才使用占位向量（维度需与 collection 一致）
+        print("⚠️  Using placeholder vector for user profile (emergency fallback)")
         dummy_vector = [0.1] * 1536
         point = PointStruct(id=user_id_hash, vector=dummy_vector, payload=payload)
         self.qdrant_client.upsert(collection_name="user_profiles", points=[point])
     
     async def _embed_async(self, text: str) -> Optional[List[float]]:
-        """异步生成文本向量；无 Key 或 API 失败时返回 None（由调用方决定是否降级 Mock）"""
+        """异步生成文本向量；无 Key 或 API 失败时返回 None（由调用方决定是否降级为占位向量）"""
         api_key = os.getenv("ALIYUN_API_KEY") or os.getenv("VOYAGE_API_KEY") or os.getenv("ZHIPU_API_KEY") or ""
         if not api_key:
             return None
@@ -207,7 +207,7 @@ class MemoryManager:
     def _search_similar_users(self, query_vector: Optional[List[float]], top_k: int) -> List[dict]:
         if query_vector is None:
             query_vector = [0.2] * 1536
-            print("⚠️  Using Mock vector for user similarity search (emergency fallback)")
+            print("⚠️  Using placeholder vector for user similarity search (emergency fallback)")
         else:
             print(f"✅ User similarity query vector generated (dim={len(query_vector)})")
 
@@ -239,7 +239,7 @@ class MemoryManager:
     def _search_similar_learnings(self, query_vector: Optional[List[float]], top_k: int) -> List[dict]:
         if query_vector is None:
             query_vector = [0.4] * 1536
-            print("⚠️  Using Mock vector for learning history search (emergency fallback)")
+            print("⚠️  Using placeholder vector for learning history search (emergency fallback)")
         else:
             print(f"✅ Learning history search vector generated (dim={len(query_vector)})")
 
@@ -259,7 +259,7 @@ class MemoryManager:
         ]
     
     async def record_learning_event_async(self, event: dict):
-        """记录学习事件到历史（真实向量优先，Mock 仅作紧急降级）"""
+        """记录学习事件到历史（真实向量优先，占位向量仅作紧急降级）"""
         if not self.user_id:
             raise ValueError("User ID not set")
 
@@ -279,8 +279,8 @@ class MemoryManager:
             self.qdrant_client.upsert(collection_name="learning_history", points=[point])
             return
 
-        # 紧急降级：真实向量不可用时才使用 Mock（维度需与 collection 一致）
-        print("⚠️  Using Mock vector for learning event (emergency fallback)")
+        # 紧急降级：真实向量不可用时才使用占位向量（维度需与 collection 一致）
+        print("⚠️  Using placeholder vector for learning event (emergency fallback)")
         dummy_vector = [0.3] * 1536
         point = PointStruct(id=event_id_hash, vector=dummy_vector, payload=event)
         self.qdrant_client.upsert(collection_name="learning_history", points=[point])
@@ -309,7 +309,7 @@ class MemoryManager:
     
     def recommend_for_new_user(self, news_items: List[dict]) -> List[dict]:
         """为新用户推荐热门内容（Cold Start 解决方案）"""
-        # 按热度排序（Mock: 按更新时间降序）
+        # 按热度排序（降级策略：按更新时间降序）
         sorted_items = sorted(news_items, key=lambda x: x.get("created_at", ""), reverse=True)
         return sorted_items[:10]
     

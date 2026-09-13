@@ -15,7 +15,7 @@ from datetime import datetime, timezone
 from loguru import logger
 
 from src.modules.agent import LearningStateMachine
-from src.api.routes.discover import MOCK_NEWS
+from src.api.routes.discover import FALLBACK_NEWS
 
 router = APIRouter(prefix="/learning", tags=["Learning"])
 
@@ -63,8 +63,8 @@ def get_memory_manager():
 
 
 def _find_news_item(news_item_id: str):
-    """根据资讯 ID 查找资讯内容（先查 Mock，再查知识库，最后查 Redis 抓取缓存）"""
-    for item in MOCK_NEWS:
+    """根据资讯 ID 查找资讯内容（先查内置示例，再查知识库，最后查 Redis 抓取缓存）"""
+    for item in FALLBACK_NEWS:
         if item["id"] == news_item_id:
             return item
     try:
@@ -87,8 +87,8 @@ def _find_news_item(news_item_id: str):
     return None
 
 
-def _generate_mock_response(question: str, context: dict) -> str:
-    """生成 Mock 回答（当 LLM 不可用时）"""
+def _generate_fallback_response(question: str, context: dict) -> str:
+    """生成降级回答（当 LLM 不可用时）"""
     if "什么是" in question or "定义" in question:
         return f"**{context['topic']}** 是一个专注于 {', '.join(context['core_concepts'])} 的技术工具。\n\n它的核心优势在于：**性能提升 10 倍**、更好的类型提示支持和全新的 API 设计。非常适合 Python 数据处理场景。"
     elif "为什么" in question:
@@ -313,10 +313,10 @@ async def chat_with_ai(data: Dict[str, Any]) -> Dict[str, Any]:
                 logger.info(f"✅ LLM generated response for session {session_id}")
             except Exception as llm_error:
                 logger.error(f"❌ LLM generation failed: {llm_error}")
-                ai_response = _generate_mock_response(user_message, news_context)
+                ai_response = _generate_fallback_response(user_message, news_context)
         else:
-            # Mock 模式
-            ai_response = _generate_mock_response(user_message, news_context)
+            # 降级模式
+            ai_response = _generate_fallback_response(user_message, news_context)
         
         # 更新对话历史
         updated_history = conversation_history + [

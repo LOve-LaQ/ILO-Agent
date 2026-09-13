@@ -28,7 +28,7 @@ def create_application() -> FastAPI:
     
     app = FastAPI(
         title="ILO-Agent Demo",
-        description="AI 技术情报官 · 求职演示项目",
+        description="AI 技术情报官 · 智能技术资讯与学习 Agent",
         version="0.1.0",
         docs_url="/docs",
         redoc_url="/redoc"

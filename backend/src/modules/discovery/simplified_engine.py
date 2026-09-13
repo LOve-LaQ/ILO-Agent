@@ -3,7 +3,7 @@
 功能:
 - 使用 httpx 直接请求（避免 feedparser 兼容性 issue）
 - GitHub Trending 数据抓取
-- Mock 技术资讯生成
+- 内置示例资讯生成
 - 标签分类和去重
 
 注意：为了避开 Python 3.13 的 cgi 模块问题，我们直接请求 API
@@ -22,8 +22,8 @@ class SimplifiedNewsDiscoveryEngine:
         self.config = config or {}
         self.httpx_client = httpx.AsyncClient(timeout=30)
         
-        # Mock 技术资讯数据（替代 RSS）
-        self.mock_news_template = [
+        # 内置示例资讯数据（替代 RSS）
+        self.fallback_news_template = [
             {
                 "title": "Python 异步编程新进展",
                 "summary": "最新版本的 Python 带来了更强大的异步特性，包括 asyncio 的改进和新的协程优化...",
@@ -67,11 +67,11 @@ class SimplifiedNewsDiscoveryEngine:
             print(f"[INFO] Fetched {len(trending)} items from GitHub Trending")
         except Exception as e:
             print(f"[WARN] Failed to fetch GitHub Trending: {e}")
-            print("[INFO] Using mock data instead")
+            print("[INFO] Using built-in sample data instead")
         
-        # 添加 Mock 数据
-        mock_items = self._generate_mock_items()
-        items.extend(mock_items)
+        # 添加内置示例数据
+        fallback_items = self._generate_fallback_items()
+        items.extend(fallback_items)
         
         # 去重并排序
         return self._deduplicate_and_sort(items, limit)
@@ -97,13 +97,13 @@ class SimplifiedNewsDiscoveryEngine:
         
         return items
     
-    def _generate_mock_items(self) -> List[Dict[str, Any]]:
-        """生成 Mock 技术资讯"""
+    def _generate_fallback_items(self) -> List[Dict[str, Any]]:
+        """生成内置示例技术资讯"""
         items = []
         now = datetime.now(timezone.utc)
         
-        for i, template in enumerate(self.mock_news_template):
-            item_id = f"mock-news-{i+1:03d}"
+        for i, template in enumerate(self.fallback_news_template):
+            item_id = f"sample-news-{i+1:03d}"
             
             items.append({
                 "id": item_id,
@@ -111,7 +111,7 @@ class SimplifiedNewsDiscoveryEngine:
                 "summary": template["summary"],
                 "link": f"https://example.com/news/{item_id}",
                 "published": now.isoformat(),
-                "source": "Mock Feed",
+                "source": "Sample Feed",
                 "tags": [],  # 后续填充
                 "core_concepts": [],  # 后续填充
                 "created_at": now.isoformat(),

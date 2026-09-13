@@ -19,7 +19,8 @@ docker --version  # 可选
 ### **步骤 2: 克隆项目**
 
 ```bash
-cd c:\Users\ZY\Documents\ck1\ilo-agent-demo
+git clone https://github.com/LOve-LaQ/ILO-Agent.git
+cd ILO-Agent
 ```
 
 ---
@@ -78,14 +79,12 @@ QDRANT_URL=http://localhost:6333
 ### **步骤 6: 启动 FastAPI Backend**
 
 ```bash
-# 回到项目根目录
-cd ..
-
-# Windows PowerShell
-uvicorn ilo-agent-demo.backend.src.api.main:app --reload --host 0.0.0.0 --port 8000
-
-# 或使用 start_dev.py 脚本
+# 方式 1: 从项目根目录运行一键启动脚本
 python backend/start_dev.py
+
+# 方式 2: 手动启动（需先进入 backend 目录）
+cd backend
+python src/api/main.py
 ```
 
 **访问地址:**
@@ -110,7 +109,7 @@ python -m http.server 3000
 
 ## 🧪 测试运行
 
-### **方式 A: API 测试**
+### **API 测试**
 
 ```bash
 # 测试 Discovery Engine
@@ -127,18 +126,6 @@ curl -X POST http://localhost:8000/api/v1/learning/session \
   }'
 ```
 
-### **方式 B: 单元测试**
-
-```bash
-cd backend
-pytest tests/ -v
-
-# 预期输出
-✅ TestCreateSession: PASSED
-✅ TestProcessQuiz: PASSED
-🎉 All tests passed!
-```
-
 ---
 
 ## 📁 项目结构速览
@@ -150,16 +137,15 @@ ilo-agent-demo/
 │   │   ├── core/               # 配置管理
 │   │   ├── api/                # FastAPI 路由
 │   │   └── modules/            # 核心业务模块
-│   │       └── agent/          # ⭐⭐⭐ LangGraph 状态机 + Mem0
-│   ├── tests/                  # 单元测试
+│   │       └── agent/          # ⭐⭐⭐ 学习状态机 + 分层记忆
+│   ├── news_scheduler.py       # 资讯抓取定时调度
+│   ├── start_dev.py            # 一键启动脚本
 │   └── requirements.txt        # Python 依赖
 │
 ├── frontend/                    # HTML5 前端
-│   ├── index.html              # 单页面应用
-│   └── README.md               # 前端说明
+│   └── index.html              # 单页面应用
 │
 ├── docker-compose.yml           # Docker 编排
-├── demo_script.md              # 📋 面试演示脚本
 └── README.md                   # 项目总览
 ```
 
@@ -169,21 +155,21 @@ ilo-agent-demo/
 
 这个 Demo 展示了哪些技术能力？
 
-| 模块 | 技术点 | 面试价值 ⭐⭐⭐⭐⭐ |
-|------|--------|-----------------|
-| **LangGraph 状态机** | 多轮对话流程编排 | ⭐⭐⭐⭐⭐ |
-| **Memory Manager** | Redis + Qdrant 分层存储 | ⭐⭐⭐⭐⭐ |
-| **FSRS Calculator** | 间隔重复算法实现 | ⭐⭐⭐⭐ |
-| **Discovery Engine** | 异步爬虫 + ETL 管道 | ⭐⭐⭐⭐ |
-| **FastAPI** | 高性能 API 设计 | ⭐⭐⭐⭐ |
-| **Alpine.js 前端** | 轻量级交互 | ⭐⭐⭐ |
+| 模块 | 技术点 | 亮点 |
+|------|--------|------|
+| **学习状态机** | 多轮对话流程编排 | 状态流转清晰、易扩展 |
+| **Memory Manager** | Redis + Qdrant 分层存储 | 短期/长期记忆分离 |
+| **FSRS Calculator** | 间隔重复算法实现 | 理论算法工程落地 |
+| **Discovery Engine** | 异步爬虫 + ETL 管道 | 多源抓取与去重 |
+| **FastAPI** | 高性能 API 设计 | 异步接口 + 异常兜底 |
+| **Alpine.js 前端** | 轻量级交互 | 零构建快速交付 |
 
 ---
 
 ## ❓ 常见问题解答
 
 ### **Q: 不需要 OpenAI API Key 也能运行吗？**
-**A:** 可以！当前版本是 Mock 实现，所有讲解内容和测验题目都是硬编码的。如果需要真实 LLM，才必须配置 OPENAI_API_KEY。
+**A:** 可以！未配置 LLM 时系统会降级到内置示例内容，保证整条流程可跑通。配置真实的 LLM API Key（如 DeepSeek）后即可生成真实讲解与测验。
 
 ### **Q: Redis 和 Qdrant 是必须的吗？**
 **A:** 推荐配置但不是必须的。如果没配，系统会使用内存替代，数据会保存在运行时。
@@ -195,7 +181,7 @@ ilo-agent-demo/
 **A:** 
 1. 接入真实 RSS 源（GitHub/Twitter）→ 修改 `backend/src/modules/discovery/engine.py`
 2. 集成真实 LLM → 在 `state_machine.py` 中调用 OpenAI API
-3. 完善推荐算法 → 扩展 `router.py` 中的 70/30 Rule
+3. 完善推荐算法 → 扩展 `memory_manager.py` 中的相似用户协同过滤
 
 ---
 
@@ -203,8 +189,8 @@ ilo-agent-demo/
 
 1. **立即体验**: 打开浏览器访问 http://localhost:8000/docs，尝试几个 API 接口
 2. **阅读代码**: 重点看 `backend/src/modules/agent/state_machine.py`（核心亮点！）
-3. **准备面试**: 按照 `demo_script.md` 准备 3 分钟演示
-4. **开源分享**: 推送到 GitHub，配置自动部署到 Vercel
+3. **体验完整流程**: 通过前端页面走通“讲解 → 测验 → 复习规划”完整链路
+4. **部署上线**: 推送到 GitHub，可选配置 Docker / Vercel 部署
 
 ---
 
@@ -239,9 +225,8 @@ pip install -r requirements.txt
 
 ---
 
-**祝你好运！** 🚀✨
+祝你使用愉快！ 🚀
 
-如有问题，欢迎查阅：
-- [`README.md`](../README.md) - 完整项目介绍
-- [`demo_script.md`](./demo_script.md) - 面试演示脚本
-- [`backend/tests/`](../backend/tests/) - 单元测试用例
+相关文档：
+- [`README.md`](./README.md) - 完整项目介绍
+- API 文档：http://localhost:8000/docs

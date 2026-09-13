@@ -48,8 +48,8 @@ def get_feed_cache() -> Optional[List[Dict[str, Any]]]:
         return None
 
 
-# Mock 数据 - 精简版（简介 100 字内）
-MOCK_NEWS = [
+# 内置示例数据 - 精简版（简介 100 字内）
+FALLBACK_NEWS = [
     {
         "id": "news-001",
         "title": "Pydantic v2: 革命性数据验证框架",
@@ -125,14 +125,14 @@ async def get_recommended_news(
             "source": "github",
         }
 
-    # 最终回退到 Mock（保 demo 可用）
-    recommended = MOCK_NEWS[offset:offset + limit]
+    # 最终回退到内置示例数据（保证 demo 可用）
+    recommended = FALLBACK_NEWS[offset:offset + limit]
     return {
         "items": recommended,
         "count": len(recommended),
-        "total": len(MOCK_NEWS),
-        "has_more": offset + limit < len(MOCK_NEWS),
-        "source": "mock",
+        "total": len(FALLBACK_NEWS),
+        "has_more": offset + limit < len(FALLBACK_NEWS),
+        "source": "sample",
     }
 
 
@@ -276,7 +276,7 @@ async def get_trending_news() -> Dict[str, Any]:
     """
     # 按日期降序模拟热度
     sorted_news = sorted(
-        MOCK_NEWS,
+        FALLBACK_NEWS,
         key=lambda x: x.get("created_at", ""),
         reverse=True
     )
@@ -297,7 +297,7 @@ async def get_news_by_tag(tag: str, limit: int = 10) -> Dict[str, Any]:
     - GET /discover/by-tag/frontend
     """
     filtered = [
-        item for item in MOCK_NEWS
+        item for item in FALLBACK_NEWS
         if tag.lower() in [t.lower() for t in item.get("tags", [])]
     ][:limit]
     

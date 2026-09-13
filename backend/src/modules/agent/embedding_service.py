@@ -15,13 +15,13 @@
 
 当前实现状态：
 ✅ 完整的架构设计
-✅ Mock 降级策略
+✅ 多 Provider 降级策略
 ✅ 可快速启用任意 provider
 
 配置方式:
 1. 检查 backend/.env 中的 API Key
 2. 系统自动选择可用的 provider
-3. 全部失败时降级到 Mock
+3. 全部失败时降级到占位向量
 """
 
 import httpx
@@ -98,8 +98,8 @@ class EmbeddingService:
             return self.provider
 
         if not self.api_key:
-            print("[WARN] No valid API key found, using Mock embedding")
-            return "mock"
+            print("[WARN] No valid API key found, using placeholder embedding")
+            return "fallback"
 
         # 优先级 1: 阿里云 Qwen（中文最优）
         if self.api_key == os.getenv("ALIYUN_API_KEY"):
@@ -138,15 +138,15 @@ class EmbeddingService:
             print("[INFO] Using OpenAI for embeddings")
             return "openai"
 
-        # 降级到 Mock
-        print("[WARN] No valid API key found, using Mock embedding")
-        return "mock"
+        # 降级到占位向量
+        print("[WARN] No valid API key found, using placeholder embedding")
+        return "fallback"
     
     async def _request_embedding(self, text: str) -> Optional[List[float]]:
         """向 API 请求嵌入向量"""
         
-        # Mock 降级
-        if self._current_provider == "mock":
+        # 降级模式
+        if self._current_provider == "fallback":
             return None
         
         try:
@@ -271,14 +271,14 @@ class EmbeddingService:
 
         Returns:
             真实向量列表；当 Provider 不可用或 API 请求失败时返回 None，
-            由调用方决定是否降级（Mock 仅作为紧急方案）。
+            由调用方决定是否降级（占位向量仅作为紧急方案）。
         """
         # 检查缓存
         cache_key = hashlib.md5(text.encode()).hexdigest()
         if cache_key in self._cache:
             return self._cache[cache_key]
 
-        # 向 API 请求（失败返回 None，不再在底层生成 Mock）
+        # 向 API 请求（失败返回 None，不再在底层生成占位向量）
         embedding = await self._request_embedding(text)
 
         if embedding is not None:
