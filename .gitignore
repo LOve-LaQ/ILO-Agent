@@ -1,0 +1,69 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+ENV/
+env/
+.venv/
+
+# Logs
+logs/
+*.log
+
+# Environment variables
+.env
+.env.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker
+docker-compose.override.yml
+
+# Build outputs
+build/
+dist/
+*.egg-info/
+
+# Testing
+.coverage
+htmlcov/
+.pytest_cache/
+/backend/quick_test.py
+/backend/test_*.py
+
+# Database
+*.db
+*.sqlite3
+
+# Local runtime data & artifacts (kept on local machine, not uploaded)
+backend/ilo/
+qdrant_data/
+.workbuddy/
+shots_probe.png
+
+# Local backup of development scripts & notes (see _local_backup/)
+_local_backup/
+
+# Root-level development notes (README.md / QUICKSTART.md remain in repo)
+/DELIVERY_CHECKLIST.md
+/DOCKER_QDRANT_SETUP.md
+/EMBEDDING_SETUP.md
+/MULTI_EMBEDDING_PROVIDERS.md
+/PROJECT_STRUCTURE.md
+/PROJECT_SUMMARY.md
+/QUICK_SETUP_ALIYUN.md
+/SCHEDULER_GUIDE.md
+/STEP4_COMPLETE.md
+/demo_script.md
+/frontend/README.md

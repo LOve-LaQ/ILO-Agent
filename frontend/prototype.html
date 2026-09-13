@@ -1,0 +1,494 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ILO 技术情报官 · 视觉稿 v2</title>
+<style>
+  /* ============ Design Tokens · 干净明亮 (Linear/Notion 风) ============ */
+  :root {
+    --bg: #f7f7f8;              /* 页面底色：极浅灰 */
+    --surface: #ffffff;         /* 卡片白 */
+    --border: #e9e9ec;          /* 细边框 */
+    --border-strong: #dcdce0;
+    --text: #19191d;            /* 主文字 */
+    --text-2: #5f5f68;          /* 次级 */
+    --text-3: #9a9aa3;          /* 弱化 */
+    --brand: #5b5bd6;           /* 品牌：柔和靛蓝紫 (Linear 系) */
+    --brand-weak: #efeffb;      /* 品牌淡底 */
+    --brand-strong: #4a4ab2;
+    --ok: #12995f;
+    --warn: #c77700;
+    --chip-bg: #f1f1f3;
+    --radius: 14px;
+    --radius-sm: 9px;
+    --shadow-card: 0 1px 2px rgba(24,24,27,.04), 0 1px 1px rgba(24,24,27,.03);
+    --shadow-pop: 0 12px 32px rgba(24,24,27,.12);
+    --font: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", Roboto, "Helvetica Neue", Arial, sans-serif;
+    --mono: "SF Mono", "JetBrains Mono", Consolas, "Courier New", monospace;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html { -webkit-font-smoothing: antialiased; }
+  body {
+    font-family: var(--font);
+    background: var(--bg);
+    color: var(--text);
+    font-size: 14px;
+    line-height: 1.55;
+  }
+  a { color: inherit; text-decoration: none; }
+  button { font-family: inherit; cursor: pointer; border: none; background: none; }
+  .wrap { max-width: 1080px; margin: 0 auto; padding: 0 24px; }
+
+  /* ============ 视觉稿说明条（非最终产物，确认后移除） ============ */
+  .proto-note {
+    background: #fdf9ec; border-bottom: 1px solid #f0e7c9; color: #7a6426;
+    font-size: 12.5px; padding: 7px 16px; text-align: center;
+  }
+  .proto-note b { font-weight: 600; }
+
+  /* ============ 顶部导航 ============ */
+  .nav {
+    position: sticky; top: 0; z-index: 20;
+    background: rgba(255,255,255,.86); backdrop-filter: blur(12px);
+    border-bottom: 1px solid var(--border);
+  }
+  .nav-inner { height: 60px; display: flex; align-items: center; gap: 16px; }
+  .brand { display: flex; align-items: center; gap: 9px; font-weight: 700; font-size: 15.5px; letter-spacing: .2px; }
+  .brand-mark {
+    width: 26px; height: 26px; border-radius: 8px; display: grid; place-items: center;
+    background: linear-gradient(135deg, #6d6df0, #4a4ab2); color: #fff; font-size: 13px;
+    box-shadow: 0 2px 6px rgba(91,91,214,.35);
+  }
+  .brand-sub { color: var(--text-3); font-weight: 400; font-size: 12px; margin-left: 2px; }
+
+  .seg { display: flex; background: var(--chip-bg); border-radius: 10px; padding: 3px; gap: 2px; }
+  .seg button {
+    padding: 5px 16px; border-radius: 8px; font-size: 13px; color: var(--text-2);
+    display: flex; align-items: center; gap: 6px; font-weight: 500;
+  }
+  .seg button.on { background: #fff; color: var(--text); box-shadow: 0 1px 2px rgba(0,0,0,.06); }
+  .seg .cnt { font-size: 11px; color: var(--text-3); background: var(--chip-bg); border-radius: 99px; padding: 0 6px; line-height: 16px; }
+  .seg button.on .cnt { background: var(--brand-weak); color: var(--brand); }
+
+  .nav-right { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+  .icon-btn {
+    width: 32px; height: 32px; border-radius: 8px; display: grid; place-items: center;
+    color: var(--text-2); transition: background .15s;
+  }
+  .icon-btn:hover { background: var(--chip-bg); color: var(--text); }
+  .btn {
+    display: inline-flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 500;
+    padding: 6px 14px; border-radius: 9px; transition: all .15s;
+  }
+  .btn-primary { background: var(--brand); color: #fff; }
+  .btn-primary:hover { background: var(--brand-strong); box-shadow: 0 4px 12px rgba(91,91,214,.28); }
+  .btn-ghost { color: var(--text-2); }
+  .btn-ghost:hover { background: var(--chip-bg); color: var(--text); }
+
+  /* ============ 视图操作条 ============ */
+  .toolbar { display: flex; align-items: center; gap: 12px; padding: 18px 0 6px; }
+  .toolbar h1 { font-size: 18px; font-weight: 650; letter-spacing: .1px; }
+  .toolbar .meta { color: var(--text-3); font-size: 12.5px; margin-top: 1px; }
+  .pill-row { display: flex; gap: 6px; margin-left: auto; }
+  .pill {
+    font-size: 12.5px; color: var(--text-2); padding: 4px 12px; border-radius: 99px;
+    border: 1px solid var(--border); background: var(--surface); transition: all .15s;
+  }
+  .pill:hover { border-color: var(--border-strong); }
+  .pill.on { background: var(--brand); border-color: var(--brand); color: #fff; }
+  .dot-sep { width: 1px; height: 16px; background: var(--border); }
+
+  /* ============ 卡片流 ============ */
+  .feed { padding: 14px 0 40px; }
+  .grid-2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px; }
+  .card {
+    background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+    box-shadow: var(--shadow-card); padding: 16px 16px 14px;
+    display: flex; flex-direction: column; gap: 10px;
+    transition: box-shadow .18s, transform .18s, border-color .18s;
+  }
+  .card:hover { box-shadow: var(--shadow-pop); transform: translateY(-1px); border-color: var(--border-strong); }
+
+  /* —— 仓库卡 —— */
+  .card-head { display: flex; align-items: center; gap: 8px; min-width: 0; }
+  .lang-dot { width: 8px; height: 8px; border-radius: 3px; flex: none; }
+  .repo-name { font-weight: 650; font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .repo-name code { font-family: var(--mono); font-size: 13px; }
+  .card-head .right { margin-left: auto; display: flex; gap: 4px; flex: none; }
+  .tiny-btn { color: var(--text-3); padding: 4px; border-radius: 7px; font-size: 14px; line-height: 1; }
+  .tiny-btn:hover { background: var(--chip-bg); color: var(--text); }
+  .one-liner { color: var(--text-2); font-size: 13px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; min-height: 38px; }
+  .tags { display: flex; flex-wrap: wrap; gap: 6px; }
+  .tag { font-size: 11.5px; color: var(--text-2); background: var(--chip-bg); padding: 2px 9px; border-radius: 99px; }
+  .tag.cat { color: var(--brand); background: var(--brand-weak); font-weight: 500; }
+  .card-foot {
+    border-top: 1px solid var(--border); padding-top: 10px; margin-top: 2px;
+    display: flex; align-items: center; gap: 12px; color: var(--text-3); font-size: 12px;
+  }
+  .card-foot .ops { margin-left: auto; display: flex; gap: 8px; align-items: center; }
+  .mini-btn {
+    font-size: 12px; font-weight: 500; padding: 4px 10px; border-radius: 7px; color: var(--text-2);
+    border: 1px solid var(--border); background: #fff; transition: all .15s;
+  }
+  .mini-btn:hover { border-color: var(--brand); color: var(--brand); }
+  .mini-btn.solid { background: var(--brand); border-color: var(--brand); color: #fff; }
+  .mini-btn.solid:hover { background: var(--brand-strong); color: #fff; }
+  .foot-metric { display: inline-flex; align-items: center; gap: 4px; }
+  .foot-metric svg { opacity: .8; }
+
+  /* —— 文章卡 —— */
+  .art-source { display: flex; align-items: center; gap: 7px; font-size: 11.5px; color: var(--text-3); text-transform: none; }
+  .src-logo {
+    width: 17px; height: 17px; border-radius: 5px; display: grid; place-items: center;
+    font-size: 9.5px; font-weight: 700; color: #fff; letter-spacing: -.2px;
+  }
+  .s-hn { background: #ff6600; } .s-lob { background: #e8561b; } .s-dev { background: #2b2b2b; } .s-so { background: #e8791c; } .s-gh { background: #24292f; }
+  .art-title { font-size: 15.5px; font-weight: 650; line-height: 1.4; }
+  .art-title a:hover { color: var(--brand); }
+  .heat { display: flex; gap: 10px; font-size: 12px; color: var(--text-2); }
+  .heat span { display: inline-flex; align-items: center; gap: 4px; }
+
+  /* ============ 空态/区块头（示意） ============ */
+  .group-label { display: flex; align-items: center; gap: 8px; padding: 6px 0 10px; color: var(--text-3); font-size: 12px; font-weight: 500; letter-spacing: .4px; }
+  .group-label::after { content: ""; flex: 1; height: 1px; background: var(--border); }
+
+  /* ============ 学习会话抽屉（示意） ============ */
+  .drawer-scrim { position: fixed; inset: 0; background: rgba(24,24,27,.28); z-index: 30; display: flex; justify-content: flex-end; }
+  .drawer {
+    width: 420px; height: 100%; background: var(--surface); box-shadow: var(--shadow-pop);
+    display: flex; flex-direction: column;
+  }
+  .drawer-head { padding: 16px 18px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 10px; }
+  .drawer-head .t { font-weight: 650; font-size: 15px; }
+  .drawer-head .sub { font-size: 12px; color: var(--text-3); font-weight: 400; }
+  .drawer-head .x { margin-left: auto; }
+  .chat-body { flex: 1; overflow: auto; padding: 18px; display: flex; flex-direction: column; gap: 12px; background: var(--bg); }
+  .bubble { max-width: 92%; padding: 10px 14px; border-radius: 14px; font-size: 13.5px; line-height: 1.6; }
+  .bubble.ai { background: var(--surface); border: 1px solid var(--border); border-bottom-left-radius: 5px; align-self: flex-start; }
+  .bubble.me { background: var(--brand); color: #fff; border-bottom-right-radius: 5px; align-self: flex-end; }
+  .bubble code { font-family: var(--mono); font-size: 12px; background: rgba(91,91,214,.1); padding: 1px 5px; border-radius: 5px; }
+  .typing { display: inline-flex; gap: 4px; padding: 4px 2px; }
+  .typing i { width: 6px; height: 6px; background: var(--text-3); border-radius: 50%; }
+  .drawer-input { padding: 12px 14px; border-top: 1px solid var(--border); display: flex; gap: 8px; align-items: center; background: var(--surface); }
+  .drawer-input input {
+    flex: 1; border: 1px solid var(--border); background: var(--bg); border-radius: 10px;
+    padding: 9px 13px; font-size: 13.5px; font-family: inherit; outline: none; transition: border .15s, box-shadow .15s;
+  }
+  .drawer-input input:focus { border-color: var(--brand); box-shadow: 0 0 0 3px rgba(91,91,214,.14); background: #fff; }
+  .send { width: 34px; height: 34px; border-radius: 10px; background: var(--brand); color: #fff; display: grid; place-items: center; }
+  .send:hover { background: var(--brand-strong); }
+
+  /* ============ 页脚（示意） ============ */
+  .foot-note { text-align: center; color: var(--text-3); font-size: 12px; padding: 18px 0 34px; }
+
+  @media (max-width: 860px) { .grid-2 { grid-template-columns: 1fr; } .drawer { width: 100%; } }
+</style>
+</head>
+<body>
+
+<!-- 视觉稿说明：确认方向后移除，替换为正式页面 -->
+<div class="proto-note">🖌 <b>视觉稿 v2 · 干净明亮</b> —— 本页为静态方向稿（非最终页面），用于确认配色 / 布局 / 信息层级，所有数据为真实接口样例</div>
+
+<!-- ================= 顶部导航 ================= -->
+<nav class="nav">
+  <div class="wrap nav-inner">
+    <div class="brand">
+      <span class="brand-mark">I</span>
+      <span>ILO 技术情报官</span>
+      <span class="brand-sub">intelligence &amp; learning</span>
+    </div>
+
+    <!-- 主 Tab：仓库 / 文章 -->
+    <div class="seg" style="margin-left: 14px;">
+      <button class="on">📦 仓库 <span class="cnt">132</span></button>
+      <button>📰 文章 <span class="cnt">87</span></button>
+    </div>
+
+    <div class="nav-right">
+      <button class="icon-btn" title="换一批">↻</button>
+      <span class="dot-sep"></span>
+      <button class="btn btn-primary">🛰 抓取最新</button>
+    </div>
+  </div>
+</nav>
+
+<main class="wrap">
+
+  <!-- ================= 仓库视图 ================= -->
+  <section id="view-repo">
+    <div class="toolbar">
+      <div>
+        <h1>今日技术仓库</h1>
+        <div class="meta">近 7 天创建 · 按 star 排序 · 通义千问中文摘要</div>
+      </div>
+      <div class="pill-row">
+        <button class="pill on">当日</button>
+        <button class="pill">当周</button>
+        <button class="pill">当月</button>
+      </div>
+    </div>
+
+    <div class="grid-2 feed">
+      <!-- 仓库卡 -->
+      <article class="card">
+        <div class="card-head">
+          <span class="lang-dot" style="background:#5a5a5a"></span>
+          <span class="repo-name"><code>vinzdg/codenotch</code></span>
+          <span class="right">
+            <button class="tiny-btn">🔖</button>
+            <button class="tiny-btn">↗</button>
+          </span>
+        </div>
+        <p class="one-liner">macOS 端 AI 编码工具使用时长监控面板，统计各 AI 助手在你工作流中的占比。</p>
+        <div class="tags">
+          <span class="tag cat">工具</span><span class="tag">Swift</span><span class="tag">macOS</span>
+        </div>
+        <div class="card-foot">
+          <span class="foot-metric">⭐ <b>1.1k</b></span>
+          <span class="ops">
+            <button class="mini-btn">🛡 讲解</button>
+            <button class="mini-btn solid">开始学习</button>
+          </span>
+        </div>
+      </article>
+
+      <article class="card">
+        <div class="card-head">
+          <span class="lang-dot" style="background:#6c4cc4"></span>
+          <span class="repo-name"><code>anthropics/fermats-last-theorem</code></span>
+          <span class="right"><button class="tiny-btn">↗</button></span>
+        </div>
+        <p class="one-liner">用 Lean 定理证明器形式化费马大定理，数学与 AI 形式化验证的里程碑工程。</p>
+        <div class="tags">
+          <span class="tag cat">其他</span><span class="tag">Lean</span><span class="tag">Mathlib</span>
+        </div>
+        <div class="card-foot">
+          <span class="foot-metric">⭐ <b>981</b></span>
+          <span class="ops">
+            <button class="mini-btn">🛡 讲解</button>
+            <button class="mini-btn solid">开始学习</button>
+          </span>
+        </div>
+      </article>
+
+      <article class="card">
+        <div class="card-head">
+          <span class="lang-dot" style="background:#555"></span>
+          <span class="repo-name"><code>MSNightmare/FalconFlank</code></span>
+          <span class="right"><button class="tiny-btn">↗</button></span>
+        </div>
+        <p class="one-liner">CrowdStrike Falcon 零日提权漏洞利用代码，安全研究者绕开内核加固的实战样本。</p>
+        <div class="tags">
+          <span class="tag cat">安全</span><span class="tag">C</span><span class="tag">Windows Kernel</span>
+        </div>
+        <div class="card-foot">
+          <span class="foot-metric">⭐ <b>560</b></span>
+          <span class="ops">
+            <button class="mini-btn">🛡 讲解</button>
+            <button class="mini-btn solid">开始学习</button>
+          </span>
+        </div>
+      </article>
+
+      <article class="card">
+        <div class="card-head">
+          <span class="lang-dot" style="background:#f05138"></span>
+          <span class="repo-name"><code>openai/NavierStokesAndEuler</code></span>
+          <span class="right"><button class="tiny-btn">↗</button></span>
+        </div>
+        <p class="one-liner">Navier-Stokes 与 Euler 方程结果的 Lean 形式化证明，OpenAI 数学验证新动作。</p>
+        <div class="tags">
+          <span class="tag cat">其他</span><span class="tag">Lean</span><span class="tag">Analysis</span>
+        </div>
+        <div class="card-foot">
+          <span class="foot-metric">⭐ <b>966</b></span>
+          <span class="ops">
+            <button class="mini-btn">🛡 讲解</button>
+            <button class="mini-btn solid">开始学习</button>
+          </span>
+        </div>
+      </article>
+
+      <article class="card">
+        <div class="card-head">
+          <span class="lang-dot" style="background:#f05138"></span>
+          <span class="repo-name"><code>burakgon/stop-stutter</code></span>
+          <span class="right"><button class="tiny-btn">↗</button></span>
+        </div>
+        <p class="one-liner">Mac 游戏串流防卡顿优化工具，通过 AWDL 链路调优降低延迟与丢帧。</p>
+        <div class="tags">
+          <span class="tag cat">运维</span><span class="tag">Swift</span><span class="tag">AWDL</span>
+        </div>
+        <div class="card-foot">
+          <span class="foot-metric">⭐ <b>493</b></span>
+          <span class="ops">
+            <button class="mini-btn">🛡 讲解</button>
+            <button class="mini-btn solid">开始学习</button>
+          </span>
+        </div>
+      </article>
+
+      <article class="card">
+        <div class="card-head">
+          <span class="lang-dot" style="background:#f05138"></span>
+          <span class="repo-name"><code>Jarvis322/macos-sysdata</code></span>
+          <span class="right"><button class="tiny-btn">↗</button></span>
+        </div>
+        <p class="one-liner">macOS 系统数据深度清理菜单栏工具，识别占用最大的缓存与系统日志。</p>
+        <div class="tags">
+          <span class="tag cat">工具</span><span class="tag">Swift</span><span class="tag">FileProvider</span>
+        </div>
+        <div class="card-foot">
+          <span class="foot-metric">⭐ <b>599</b></span>
+          <span class="ops">
+            <button class="mini-btn">🛡 讲解</button>
+            <button class="mini-btn solid">开始学习</button>
+          </span>
+        </div>
+      </article>
+    </div>
+
+    <!-- 讲解/收藏操作说明（示意） -->
+    <div class="group-label">页面结构说明 · 仓库视图</div>
+    <div class="card" style="padding:16px 18px;">
+      <div style="font-size:13.5px; color:var(--text-2); display:grid; gap:8px; grid-template-columns:repeat(auto-fit,minmax(240px,1fr));">
+        <span>① 顶栏：品牌 + 仓库/文章切换 + 换一批/抓取</span>
+        <span>② 右侧 pills：切换 当日/当周/当月</span>
+        <span>③ 双列卡片网格，hover 浮起</span>
+        <span>④ 卡片：语言色点 · star · 讲解/学习按钮</span>
+        <span>⑤ 「开始学习」→ 右侧滑出学习会话抽屉</span>
+        <span>⑥ 点击「↗」新标签打开 GitHub 原文</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= 文章视图 ================= -->
+  <section id="view-article" style="display:none">
+    <div class="toolbar">
+      <div>
+        <h1>全球技术热门文章</h1>
+        <div class="meta">聚合 Hacker News · Lobsters · dev.to · Stack Overflow</div>
+      </div>
+      <div class="pill-row">
+        <button class="pill on">当日</button>
+        <button class="pill">当周</button>
+        <button class="pill">当月</button>
+      </div>
+    </div>
+
+    <div class="feed" style="display:grid; gap:14px;">
+      <article class="card">
+        <div class="card-head">
+          <span class="src-logo s-hn">HN</span>
+          <span class="art-source">Hacker News · 2 小时前</span>
+          <span class="right"><button class="tiny-btn">↗</button></span>
+        </div>
+        <div class="art-title"><a>DaVinci Resolve 21.1 发布，剪辑渲染性能大幅提升</a></div>
+        <p class="one-liner" style="min-height:0;">专业级视频剪辑与调色软件的年度更新，新增 AI 辅助工具与更快的渲染管线。</p>
+        <div class="tags"><span class="tag cat">工具</span><span class="tag">video</span></div>
+        <div class="card-foot">
+          <span class="heat">
+            <span>🔥 <b>363</b></span>
+            <span>💬 <b>88</b></span>
+          </span>
+          <span class="ops"><button class="mini-btn">🛡 讲解</button></span>
+        </div>
+      </article>
+
+      <article class="card">
+        <div class="card-head">
+          <span class="src-logo s-dev">d</span>
+          <span class="art-source">dev.to · 5 小时前</span>
+          <span class="right"><button class="tiny-btn">↗</button></span>
+        </div>
+        <div class="art-title"><a>Most "AI Agents" Are Just If-Statements in a Trench Coat</a></div>
+        <p class="one-liner" style="min-height:0;">揭露当前多数 AI Agent 实质是规则封装而非真正自主推理，引发社区关于架构诚实性的讨论。</p>
+        <div class="tags"><span class="tag cat">AI/ML</span><span class="tag">agent</span><span class="tag">orchestration</span></div>
+        <div class="card-foot">
+          <span class="heat">
+            <span>🔥 <b>30</b></span>
+            <span>💬 <b>16</b></span>
+          </span>
+          <span class="ops"><button class="mini-btn">🛡 讲解</button></span>
+        </div>
+      </article>
+
+      <article class="card">
+        <div class="card-head">
+          <span class="src-logo s-lob">L</span>
+          <span class="art-source">Lobsters · 7 小时前</span>
+          <span class="right"><button class="tiny-btn">↗</button></span>
+        </div>
+        <div class="art-title"><a>How to build a f**king printer</a></div>
+        <p class="one-liner" style="min-height:0;">从零构建一台功能完整打印机的硬软协同实战，覆盖 ESP32 固件与机械结构。</p>
+        <div class="tags"><span class="tag cat">其他</span><span class="tag">ESP32</span></div>
+        <div class="card-foot">
+          <span class="heat">
+            <span>🔥 <b>19</b></span>
+            <span>💬 <b>4</b></span>
+          </span>
+          <span class="ops"><button class="mini-btn">🛡 讲解</button></span>
+        </div>
+      </article>
+
+      <article class="card">
+        <div class="card-head">
+          <span class="src-logo s-so">SO</span>
+          <span class="art-source">Stack Overflow · 社区推荐</span>
+          <span class="right"><button class="tiny-btn">↗</button></span>
+        </div>
+        <div class="art-title"><a>Best messaging pattern for a server that spawns multiple workers</a></div>
+        <p class="one-liner" style="min-height:0;">多工作进程服务器的最优消息通信模式选型分析：队列 vs 发布订阅 vs 管道。</p>
+        <div class="tags"><span class="tag cat">后端</span><span class="tag">worker pool</span></div>
+        <div class="card-foot">
+          <span class="heat">
+            <span>🔥 <b>64</b></span>
+            <span>💬 <b>25</b></span>
+          </span>
+          <span class="ops"><button class="mini-btn">🛡 讲解</button></span>
+        </div>
+      </article>
+    </div>
+  </section>
+
+  <!-- ============ 学习会话抽屉（视觉示意） ============ -->
+  <div class="drawer-scrim">
+    <aside class="drawer">
+      <div class="drawer-head">
+        <div>
+          <div class="t">深度讲解 · codenotch</div>
+          <div class="sub">会话 sess_3fa2 · 由 DeepSeek 驱动</div>
+        </div>
+        <button class="x tiny-btn">✕</button>
+      </div>
+      <div class="chat-body">
+        <div class="bubble ai">**codenotch** 是一款 macOS 菜单栏工具，用来<span>统计你在各 AI 编码助手上的耗时</span>，帮你找到"工具在替你干活，还是你在陪工具聊天"。</div>
+        <div class="bubble ai">
+          <b>核心设计</b><br>
+          ① 按 <code>AppKit</code> 窗口级监控聚焦的应用<br>
+          ② 本地归类：Copilot / Cursor / Claude 等<br>
+          ③ 周报式聚合，一键查看占比趋势
+        </div>
+        <div class="bubble me">如果它想识别终端里的 neovim+AI 插件呢？</div>
+        <div class="bubble ai">
+          好问题——终端场景无法按窗口区分，通常退化为：<br>
+          1. 监听 <code>TTY</code> 会话与子进程命令行<br>
+          2. 识别 <code>copilot.vim / avante</code> 等进程特征<br>
+          3. 或接 <code>Accessibility API</code> 读取终端内容关键词
+        </div>
+        <div class="bubble ai"><span class="typing"><i></i><i></i><i></i></span></div>
+      </div>
+      <div class="drawer-input">
+        <input placeholder="追问细节，例如：它怎么区分不同 AI 工具？">
+        <button class="send">↑</button>
+      </div>
+    </aside>
+  </div>
+
+  <div class="foot-note">ILO 技术情报官 · 视觉稿 v2 —— 确认方向后将替换现有 index.html（同一套后端接口，无需改动）</div>
+</main>
+
+</body>
+</html>
