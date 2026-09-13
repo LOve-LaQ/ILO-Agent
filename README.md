@@ -92,6 +92,45 @@ RSS/API  定时触发   LLM 生成   互动测试   FSRS 算法计算
 
 ---
 
+## 🏗️ 系统架构
+
+```mermaid
+flowchart TB
+    UI["前端 · Alpine.js SPA"] -->|"REST /api/v1"| API["FastAPI 应用层"]
+    API --> DISC["资讯发现路由"]
+    API --> LEARN["学习会话路由"]
+    SCH["定时调度 · APScheduler"] --> ENGINE["发现引擎 · 多源抓取 + 去重"]
+    DISC --> ENGINE
+    ENGINE --> MEM["记忆管理器"]
+    LEARN --> SM["Agent 状态机 · IDLE → PUSHED → LEARNING → QUIZ → FSRS"]
+    SM --> MEM
+    SM --> LLM["LLM Provider · DeepSeek / OpenAI / Qwen"]
+    MEM --> EMB["Embedding 服务 · 多 Provider"]
+    MEM --> REDIS[("Redis · 短期会话 / 用户画像")]
+    MEM --> QDRANT[("Qdrant · 向量长期记忆")]
+```
+
+### **一次完整学习链路**
+
+```
+定时 / 手动触发 → 抓取资讯 → 去重分类 → 向量入库
+    → 推送通知 → 用户响应 → LLM 生成讲解 → 生成测验
+    → 提交测验评分 → 映射 FSRS 评级 → 计算下次复习时间 → 写入记忆
+```
+
+### **关键设计决策**
+
+| 决策点 | 方案与取舍 |
+|---|---|
+| 记忆分层 | 对比 Mem0（外部服务、依赖网络）后选择自建混合方案：Redis 存短期会话与用户画像，Qdrant 存长期向量记忆，并保留接入 Mem0 的能力 |
+| LLM 抽象 | `create_llm()` 按环境变量自动探测 Provider（DeepSeek 优先 → OpenAI → 自定义），无 Key 时优雅降级，不阻断主流程 |
+| 模型分工 | 对话/讲解用 DeepSeek（快且便宜），批量中文摘要用通义千问；摘要模型不可用时自动回退 |
+| 向量降级 | 真实 Embedding 优先，仅在 API 不可用时使用占位向量兜底，保证写库链路不中断 |
+| 异步安全 | 同时提供 sync / async 两套记忆接口，避免在事件循环内误用 `asyncio.run` |
+| 跨平台 | 统一 loguru 日志并强制 UTF-8，解决 Windows 控制台编码问题 |
+
+---
+
 ## 📁 项目结构
 
 ```
