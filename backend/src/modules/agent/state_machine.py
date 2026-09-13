@@ -369,7 +369,7 @@ class LearningStateMachine:
         message = f"早上有个关于 {context['topic']} 的内容要了解一下吗？"
         
         return {
-            "state": LearningState.USER_RESPONSE,
+            "state": LearningState.PUSHED,
             "message": message,
             "actions": ["展开讲讲", "太累了明天再说", "加入复习队列"]
         }

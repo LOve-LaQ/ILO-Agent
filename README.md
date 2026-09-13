@@ -263,31 +263,141 @@ python src/modules/agent/state_machine.py
 
 ---
 
-## 🎬 功能演示流程
+## 🖥️ 运行演示
 
-### **3 分钟快速演示**
+> 按「资讯推送 → 学习讲解 → 测验 → FSRS 复习」的完整链路，逐步复现一次真实运行。
+> 每一步都标注了对应的源码位置，便于对照代码逐段讲解。
 
-#### **第 0-30 秒：项目背景**
+### **步骤 0 · 启动与自检**
 
-> "这是一个 AI 技术情报官项目，核心理念是'主动带你破圈'——不是被动地回答问题，而是主动根据用户的兴趣和技术趋势，推送个性化的学习内容。"
+```bash
+# 1) 启动依赖（Redis + Qdrant，可选；未启动时自动降级，不阻塞演示）
+docker-compose up -d
 
-#### **第 30-90 秒：系统架构**
+# 2) 启动后端
+cd backend
+pip install -r requirements.txt
+python src/api/main.py            # 监听 0.0.0.0:8000
 
-> "整个系统分为几个核心模块：首先是资讯发现引擎，它从 GitHub Trending、Hacker News 等技术源抓取最新内容；然后是 Agent 状态机，管理整个学习流程；还有记忆系统，用 Redis 存短期会话，Qdrant 存长期用户画像。"
+# 3) 打开前端
+#    直接打开 frontend/index.html；或一键启动：python backend/start_dev.py
+```
 
-> "背后的算法是 FSRS v2 间隔重复算法，这是传统 SM-2 的升级版，能更精准地预测用户的遗忘曲线。"
+**自检**
+- `GET http://127.0.0.1:8000/health` → `{"status":"healthy","service":"ILO-Agent Demo"}`
+- 打开 `http://127.0.0.1:8000/docs`，可见 `Discovery` 与 `Learning` 两组接口
 
-#### **第 90-180 秒：现场演示**
+> 📸 截图位：`docs/images/00-swagger.png` — Swagger 接口总览
 
-1. **打开 API 文档** (http://localhost:8000/docs)
-2. **调用 Discover 接口** → 展示实时数据
-3. **创建学习会话** → 展示状态机流转
-4. **提交测验** → 展示评分和复习计划
-5. **展示代码** → state_machine.py 核心逻辑
+---
 
-#### **最后 30 秒：总结**
+### **步骤 1 · 资讯推送**
 
-> "这个项目的亮点在于：一是完整的端到端实现，从数据抓取到用户交互；二是清晰的业务流程管理；三是把理论算法落地为实际产品。"
+**操作**：首页打开即自动拉取卡片；「换一批」重新抽取，「刷新」触发实时抓取。
+
+```bash
+# 拉取推荐卡片（知识库随机抽样，秒回）
+curl "http://127.0.0.1:8000/api/v1/discover/news?limit=3"
+
+# 实时抓取 GitHub Trending → 去重 → 中文摘要 → 向量入库
+curl -X POST "http://127.0.0.1:8000/api/v1/discover/refresh?limit=50"
+```
+
+**预期表现**
+```json
+{ "items": [ { "id": "news-001", "title": "...", "summary": "...", "tags": ["backend"], "core_concepts": ["validators"] } ],
+  "count": 3, "total": 3, "has_more": false, "source": "knowledge_base" }
+```
+- `source` 按可用性降级：`knowledge_base`（Qdrant）→ `github`（Redis 缓存）→ `sample`（内置示例数据）
+- 抓取返回 `{ "status":"ok", "new_count":N, "skipped_count":M, "total_in_kb":K }`；已抓过的条目按 `id` 去重跳过，只对新增条目做摘要
+
+**对照代码**：`api/routes/discover.py`（`get_recommended_news` / `refresh_news`）· `modules/discovery/github_fetcher.py` · `modules/discovery/tech_knowledge.py`
+
+> 📸 截图位：`docs/images/01-feed.png` — 资讯卡片流
+> 📸 截图位：`docs/images/02-refresh.png` — 刷新进度（"通义千问提炼中文摘要…"）
+
+---
+
+### **步骤 2 · 学习讲解**
+
+**操作**：点卡片「开始讲解」创建会话，随后在对话面板追问。
+
+```bash
+# 1) 创建学习会话
+curl -X POST "http://127.0.0.1:8000/api/v1/learning/session" -H "Content-Type: application/json" \
+  -d '{"user_id":"demo-user","news_item_id":"news-001","time_budget":15,"preferred_depth":"medium"}'
+
+# 2) 围绕该主题提问
+curl -X POST "http://127.0.0.1:8000/api/v1/learning/chat" -H "Content-Type: application/json" \
+  -d '{"session_id":"sess_xxxxxxxx","message":"什么是 Pydantic？"}'
+```
+
+**预期表现**
+```json
+{ "session_id": "sess_xxxxxxxx", "status": "created", "context": { "topic": "...", "time_budget_minutes": 15, "current_state": "idle" } }
+```
+```json
+{ "response": "...", "conversation_history": [ ... ], "sources": { "topic": "...", "core_concepts": [ ... ] } }
+```
+- 会话上下文写入 Redis，刷新页面 / 重启后端不丢，重新提问仍带上原主题
+- 有 API Key 时由 DeepSeek 实时生成讲解；无 Key 时自动走内置降级回答，接口不报错
+
+**对照代码**：`api/routes/learning.py`（`create_learning_session` / `chat_with_ai`）· `modules/agent/state_machine.py`（`create_llm` / `ExplanationEngine`）
+
+> 📸 截图位：`docs/images/03-session.png` — 会话创建与上下文
+> 📸 截图位：`docs/images/04-chat.png` — AI 讲解对话
+
+---
+
+### **步骤 3 · 测验评分**
+
+> 资讯流与讲解对话可在前端界面直接操作；测验与复习环节通过 `/docs`（Swagger）或 curl 演示，重点展示后端状态机逻辑。
+
+**操作**
+```bash
+curl -X POST "http://127.0.0.1:8000/api/v1/learning/quiz" -H "Content-Type: application/json" \
+  -d '{"session_id":"sess_xxxxxxxx","user_answers":[3,0]}'
+```
+
+**预期表现**：`{ "state":"fsrs_update", "score":1.0, "grade":"优秀", "explanations":[...], "review_data":{ "new_interval":N, "next_review_date":"..." } }`
+得分按阈值映射为 FSRS 评级：`≥0.8 → 4`、`≥0.5 → 3`、`≥0.2 → 2`、`<0.2 → 1`
+
+**对照代码**：`modules/agent/state_machine.py`（`QuizFactory.evaluate` / `submit_quiz`）
+
+> 📸 截图位：`docs/images/05-quiz.png` — 测验与评分结果
+
+---
+
+### **步骤 4 · FSRS 复习计划**
+
+**操作**
+```bash
+curl -X POST "http://127.0.0.1:8000/api/v1/learning/complete" -H "Content-Type: application/json" \
+  -d '{"session_id":"sess_xxxxxxxx"}'
+```
+
+**预期表现**：`{ "status":"completed", "topic":"...", "final_score":1.0, "elapsed_minutes":..., "fsrs_update":{ "rating":4, "next_review_date":"..." } }`
+评级驱动 stability 变化，`calculate_next_interval()` 给出下次复习间隔，`predict_retrievability()` 预测回忆概率
+
+**对照代码**：`modules/agent/state_machine.py`（`FSRSCalculator` / `complete_session`）
+
+> 📸 截图位：`docs/images/06-fsrs.png` — 复习计划与评级
+
+---
+
+### **整条链路与状态机**
+
+```
+create_session   → IDLE        （建立会话，上下文写入 Redis）
+push（定时/手动） → PUSHED      （"要不要了解一下？"）
+用户响应         → LEARNING    （LLM 生成讲解 + 生成测验题）
+submit_quiz      → FSRS_UPDATE （评分 → 映射评级 → 计算复习间隔）
+complete_session → COMPLETED   （归档会话，更新记忆）
+```
+
+**一句话串讲**：定时任务把 GitHub Trending 的仓库抓下来，去重、摘要、向量入库；用户打开卡片点「开始讲解」，状态机从 `IDLE` 走到 `LEARNING` 调用 DeepSeek 生成讲解；答完测验把得分映射成 FSRS 评级，算出下次复习间隔写回记忆——整条链路是一条可观测的状态机流程，而非一堆相互独立的接口。
+
+> 📸 截图位：`docs/images/07-flow.png` — 完整链路（终端日志或页面组合图）
 
 ---
 
@@ -343,20 +453,20 @@ A: 三步走：
 
 ## 🎯 下一步优化方向
 
-### **短期（本周）**
-- [ ] 接入真实的 DeepSeek 讲解内容
-- [ ] 完善前端加载动画
-- [ ] 添加更多 RSS 源
+### **近期 · 体验闭环**
+- [ ] 前端补齐「测验 → 复习计划」界面（当前该环节通过 API 演示）
+- [ ] 测验与复习路由的会话上下文统一从 Redis 读取，移除占位上下文
+- [ ] 完善卡片刷新动画与失败重试
 
-### **中期（本月）**
-- [ ] 实现真正的向量嵌入（Embedding API）
-- [ ] 添加协同过滤推荐
-- [ ] 支持 Telegram Bot 推送
+### **中期 · 推荐与个性化**
+- [ ] 基于用户画像向量做个性化排序，替换当前的随机抽样
+- [ ] 引入协同过滤，实现「相似技术」推荐
+- [ ] 扩充标签体系，接入更多技术源
 
-### **长期（三个月+）**
-- [ ] WebAssembly 移动端适配
-- [ ] 企业版团队知识库
-- [ ] 社区功能（学习小组）
+### **长期 · 规模化**
+- [ ] 接入 Mem0 等外部记忆方案做对比验证
+- [ ] 扩展推送通道（Telegram Bot / 邮件）
+- [ ] 移动端适配与企业版团队知识库
 
 ---
 
