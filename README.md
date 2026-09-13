@@ -109,10 +109,17 @@ ilo-agent-demo/
 │   │       ├── agent/               # ⭐⭐⭐ Agent 核心
 │   │       │   ├── state_machine.py # LangGraph 风格状态机
 │   │       │   ├── memory_manager.py# 分层记忆系统
+│   │       │   ├── embedding_service.py # 向量化服务（多 Provider）
 │   │       │   └── context.py       # 上下文对象设计
 │   │       └── discovery/           # ⭐⭐ 数据采集
-│   │           ├── engine.py        # RSS 爬虫引擎
-│   │           └── simplified_engine.py # 简化版（避开兼容性问题）
+│   │           ├── engine.py             # RSS 爬虫引擎
+│   │           ├── simplified_engine.py  # 简化版（避开兼容性问题）
+│   │           ├── article_fetcher.py    # 文章抓取
+│   │           ├── github_fetcher.py     # GitHub 内容抓取
+│   │           ├── summary_spec.py       # 摘要生成规范
+│   │           └── tech_knowledge.py     # 技术知识库
+│   ├── news_scheduler.py            # 资讯抓取定时调度器
+│   ├── start_dev.py                 # 一键启动脚本
 │   ├── logs/                        # 日志文件
 │   └── requirements.txt             # Python 依赖
 │
@@ -190,7 +197,7 @@ http://localhost:8000/docs
 
 # 尝试调用 Discovery API
 GET /api/v1/discover/news
-→ 返回 Mock 技术新闻列表
+→ 返回示例技术资讯列表
 
 # 创建学习会话
 POST /api/v1/learning/session
@@ -265,7 +272,7 @@ llm = ChatOpenAI(
 
 A: 不是必须的！当前版本有降级策略：
 - 如果没有 Redis → 用内存 Dict 替代
-- 如果 Qdrant 不可用 → Mock 数据填充
+- 如果 Qdrant 不可用 → 回退到本地示例数据
 
 ### **Q: Python 3.13 兼容性问题？**
 
@@ -278,7 +285,7 @@ A: 已解决！主要改动：
 A: 三步走：
 1. 配置 `DEEPSEEK_API_KEY` 或 `OPENAI_API_KEY`
 2. 升级 `ExplanationEngine.generate()` 调用 LLM API
-3. 替换 Mock 讲解内容为真实生成的内容
+3. 将本地示例讲解替换为 LLM 实时生成的内容
 
 ---
 
