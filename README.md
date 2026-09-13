@@ -1,6 +1,6 @@
 # 🚀 ILO-Agent Demo - AI 技术情报官
 
-> **核心定位**: 面试级 AI Agent 应用演示项目  
+> **核心定位**: AI Agent 应用演示项目  
 > **一句话介绍**: 一个主动帮你学新技术的 AI 助手，基于 LangGraph + LLM + 智能记忆系统  
 > **技术亮点**: FastAPI · Redis · Qdrant · DeepSeek/GPT · FSRS 算法
 
@@ -99,8 +99,7 @@ ilo-agent-demo/
 ├── backend/                          # FastAPI 后端服务
 │   ├── src/
 │   │   ├── core/                    # 核心配置模块
-│   │   │   ├── config.py            # 环境变量与日志初始化
-│   │   │   └── exceptions.py        # 统一异常处理
+│   │   │   └── config.py            # 环境变量与日志初始化
 │   │   ├── api/                     # API 接口层
 │   │   │   ├── main.py              # FastAPI 应用入口
 │   │   │   └── routes/              # 路由模块
@@ -115,15 +114,12 @@ ilo-agent-demo/
 │   │           ├── engine.py        # RSS 爬虫引擎
 │   │           └── simplified_engine.py # 简化版（避开兼容性问题）
 │   ├── logs/                        # 日志文件
-│   ├── test_integration.py          # 前后端集成测试
 │   └── requirements.txt             # Python 依赖
 │
 ├── frontend/                        # Web 前端
-│   ├── index.html                   # Alpine.js 单页面应用
-│   └── README.md                    # 前端说明
+│   └── index.html                   # Alpine.js 单页面应用
 │
 ├── docker-compose.yml               # Docker 编排
-├── .env                             # 环境变量配置
 └── README.md                        # 本文件
 ```
 
@@ -147,7 +143,7 @@ IDLE → PUSHED → LEARNING → QUIZ → FSRS_UPDATE → COMPLETED
 - complete_session(): 完成学习并更新记忆
 ```
 
-**面试价值**: 展示复杂的业务流程管理能力
+**设计要点**: 以状态机统一管理复杂的业务流程流转
 
 ### **2. 记忆管理系统** (`backend/src/modules/agent/memory_manager.py`)
 
@@ -156,7 +152,7 @@ IDLE → PUSHED → LEARNING → QUIZ → FSRS_UPDATE → COMPLETED
 2. **长期记忆**: Qdrant (用户画像，向量检索)
 3. **工作记忆**: Dict (临时计算结果)
 
-**面试价值**: 展示大规模对话系统的 Memory 设计
+**设计要点**: 面向对话系统的分层 Memory 设计
 
 ### **3. 资讯发现引擎** (`backend/src/modules/discovery/simplified_engine.py`)
 
@@ -165,7 +161,7 @@ IDLE → PUSHED → LEARNING → QUIZ → FSRS_UPDATE → COMPLETED
 - 自动去重 + 标签分类
 - 存入 Qdrant 向量库
 
-**面试价值**: 展示异步爬虫 + ETL Pipeline 能力
+**设计要点**: 异步爬虫 + ETL Pipeline 实现
 
 ### **4. FSRS 间隔重复算法**
 
@@ -180,7 +176,7 @@ rating=4 (Easy) → next_interval=15 天
 rating=2 (Hard) → next_interval=3 天
 ```
 
-**面试价值**: 展示算法落地应用能力
+**设计要点**: 间隔重复算法的工程化落地
 
 ---
 
@@ -206,34 +202,7 @@ POST /api/v1/learning/session
 → 返回 session_id
 ```
 
-### **2. 集成测试**
-
-```bash
-cd backend
-python test_integration.py
-```
-
-**预期输出**:
-```
-==================================================
-ILO-Agent Demo - Frontend-Backend Integration Test
-==================================================
-
-[TEST 1] Getting recommended news...
-SUCCESS! Got 3 news items
-
-[TEST 2] Creating learning session...
-SUCCESS! Session ID: sess_xxx
-
-[TEST 3] Submitting quiz answers...
-QUIZ COMPLETED! Score: 1.00 (优秀)
-
-==================================================
-Test completed!
-==================================================
-```
-
-### **3. LLM 连接测试**
+### **2. LLM 连接测试**
 
 ```bash
 # 运行状态机测试（会显示 LLM 配置）
@@ -248,19 +217,19 @@ python src/modules/agent/state_machine.py
 
 ---
 
-## 🎤 面试演示脚本
+## 🎬 功能演示流程
 
-### **3 分钟 Demo 流程**
+### **3 分钟快速演示**
 
-#### **第 0-30 秒：开场白**
+#### **第 0-30 秒：项目背景**
 
-> "我想分享一个我开发的 AI 技术情报官项目，它的核心理念是'主动带你破圈'——不是被动地回答问题，而是主动根据用户的兴趣和技术趋势，推送个性化的学习内容。"
+> "这是一个 AI 技术情报官项目，核心理念是'主动带你破圈'——不是被动地回答问题，而是主动根据用户的兴趣和技术趋势，推送个性化的学习内容。"
 
-#### **第 30-90 秒：系统架构讲解**
+#### **第 30-90 秒：系统架构**
 
 > "整个系统分为几个核心模块：首先是资讯发现引擎，它从 GitHub Trending、Hacker News 等技术源抓取最新内容；然后是 Agent 状态机，管理整个学习流程；还有记忆系统，用 Redis 存短期会话，Qdrant 存长期用户画像。"
 
-> "最有趣的是背后的算法——我用的是 FSRS v2 间隔重复算法，这是传统 SM-2 的升级版，能更精准地预测用户的遗忘曲线。"
+> "背后的算法是 FSRS v2 间隔重复算法，这是传统 SM-2 的升级版，能更精准地预测用户的遗忘曲线。"
 
 #### **第 90-180 秒：现场演示**
 
@@ -270,9 +239,9 @@ python src/modules/agent/state_machine.py
 4. **提交测验** → 展示评分和复习计划
 5. **展示代码** → state_machine.py 核心逻辑
 
-#### **最后 30 秒：总结亮点**
+#### **最后 30 秒：总结**
 
-> "这个项目的亮点在于：一是完整的端到端实现，从数据抓取到用户交互都自己写的；二是展示了复杂的业务流程管理能力；三是把理论算法落地为实际产品。"
+> "这个项目的亮点在于：一是完整的端到端实现，从数据抓取到用户交互；二是清晰的业务流程管理；三是把理论算法落地为实际产品。"
 
 ---
 
@@ -381,13 +350,12 @@ MIT License
 
 ## 👨‍💻 作者
 
-由你在实习期间的求职项目打造
+ILO-Agent Demo
 
 ---
 
-**🎉 祝你面试顺利！**
+**🎉 欢迎 Star 与交流！**
 
-如果有问题，可以查看：
-- [`demo_script.md`](./demo_script.md) - 详细面试演示脚本
+如果想进一步了解：
 - [`QUICKSTART.md`](./QUICKSTART.md) - 快速开始指南
 - API 文档：http://localhost:8000/docs
