@@ -31,6 +31,11 @@ class Settings(BaseSettings):
     redis_url: str = "redis://127.0.0.1:6379/0"
     qdrant_url: str = "http://127.0.0.1:6333"
     mem0_api_key: str = ""
+
+    # GitHub（「学习先读原文」要抓仓库 README）
+    # 匿名调用 GitHub API 只有 60 次/小时，预取 README 会迅速耗尽；配 token 后可到 5000/h。
+    # 留空则自动降级到 raw CDN（不占 API 配额，但拿不到 blob sha）。
+    github_token: str = ""
     
     # Application
     log_level: str = "INFO"

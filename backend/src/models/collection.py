@@ -86,6 +86,13 @@ class CollectionRecord(Base):
     source_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     raw_description: Mapped[str | None] = mapped_column(Text, nullable=True)
 
+    # 原文快照（仓库 README）：用户在「先读原文」页看到的就是它。
+    # 首次写入即定稿 —— force 重摘要不会改写已有快照，保证「这张卡片采集时刻的原文」
+    # 永远可回溯；缺失时可在首次打开时按需补抓一次（见 collection_service）。
+    raw_content: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # 快照元信息：{path, sha, size, source, fetched_at}，用于回答「读的是哪个版本」
+    content_meta: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+
     collected_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
