@@ -9,7 +9,7 @@ LangGraph 风格的状态机编排
 
 from enum import Enum
 from typing import Dict, Any, Optional
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import asyncio
 import os
 import sys
@@ -163,8 +163,8 @@ if llm is None:
     logger.warning("=" * 50)
 
 
-class LearningState(Enum):
-    """学习状态枚举"""
+class LearningState(str, Enum):
+    """学习状态枚举（继承 str 以便直接序列化为字符串值）"""
     IDLE = "idle"                      # 空闲状态
     PUSHED = "pushed"                  # 已推送通知
     LEARNING = "learning"              # 讲解中
@@ -265,7 +265,15 @@ class QuizFactory:
         self.num_questions = config.get("num_questions", 3)
     
     def generate(self, topic: str, core_concepts: list) -> list:
-        """生成降级测验题目"""
+        """生成降级测验题目（core_concepts 可能为空，必须自愈而不是崩）"""
+        concepts = [str(c) for c in (core_concepts or []) if str(c).strip()]
+        if not concepts:
+            # 卡片不在知识库、或知识库条目缺 core_concepts 时，
+            # 下面一旦直接 concepts[0] 就会 IndexError，把 /learning/response 打成 500。
+            # 降级题目本就是兜底产物，缺概念时给一组通用选项即可。
+            concepts = ["核心概念", "工程实践", "生态工具"]
+        options = concepts[:4] if len(concepts) >= 4 else concepts + ["其他"]
+
         fallback_quiz = [
             {
                 "question": f"{topic} 的核心优势是什么？",
@@ -279,13 +287,13 @@ class QuizFactory:
                 "explanation": f"{topic} 在设计时综合考虑了性能、安全性和效率..."
             },
             {
-                "question": "以下哪个是 {topic} 的关键概念？",
-                "options": core_concepts[:4] if len(core_concepts) >= 4 else core_concepts + ["其他"],
+                "question": f"以下哪个是 {topic} 的关键概念？",
+                "options": options,
                 "correct_answer": 0,
-                "explanation": f"核心概念之一是：{core_concepts[0]}"
+                "explanation": f"核心概念之一是：{concepts[0]}"
             }
         ]
-        
+
         return fallback_quiz[:self.num_questions]
     
     def evaluate(self, user_answers: list[int], correct_answers: list[int]) -> tuple[float, list[str]]:
@@ -393,9 +401,10 @@ class LearningStateMachine:
         """开始深入学习（异步调用 LLM）"""
         context["current_state"] = LearningState.LEARNING
         
-        # 异步生成讲解内容
-        explanation = await asyncio.to_thread(
-            self.explanation_engine.generate,
+        # ExplanationEngine.generate 是 async 协程，必须直接 await。
+        # 此前用 asyncio.to_thread 包裹，拿到的是未 await 的协程对象，
+        # 导致 /learning/response 的 explanation 字段响应校验失败（string_type）。
+        explanation = await self.explanation_engine.generate(
             context["topic"],
             context
         )
@@ -436,12 +445,17 @@ class LearningStateMachine:
         context["fsrs_rating"] = fsrs_rating
         
         # 计算下次复习间隔
+        new_interval = self.fsrs_calculator.calculate_next_interval(
+            context.get("fsrs_stability", 1.0),
+            fsrs_rating
+        )
+        # 「下次复习」必须是未来时刻：此前直接写 datetime.now()，
+        # 于是刚考完就被判定为「已到期」，复习计划形同虚设。
         review_data = {
-            "new_interval": self.fsrs_calculator.calculate_next_interval(
-                context.get("fsrs_stability", 1.0),
-                fsrs_rating
-            ),
-            "next_review_date": datetime.now(timezone.utc).isoformat()
+            "new_interval": new_interval,
+            "next_review_date": (
+                datetime.now(timezone.utc) + timedelta(days=new_interval)
+            ).isoformat()
         }
         
         context["fsrs_stability"] = review_data["new_interval"]
@@ -472,8 +486,9 @@ class LearningStateMachine:
             }
         }
         
-        del self.active_sessions[context["session_id"]]
-        
+        # 会话可能仅存在于 Redis（本轮内存无记录）时不应报错
+        self.active_sessions.pop(context["session_id"], None)
+
         return result
     
     def _detect_intent(self, user_input: str) -> str:

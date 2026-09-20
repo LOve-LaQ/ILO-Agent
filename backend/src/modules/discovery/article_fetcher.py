@@ -26,6 +26,19 @@ DEVTO_TOP = {"day": 1, "week": 7, "month": 30}
 SO_SORT = {"day": "hot", "week": "week", "month": "month"}
 
 
+def _provenance(platform: str, url: str, raw_description: str) -> Dict[str, Any]:
+    """构造溯源字段（阶段 3 内容溯源）
+
+    必须在摘要生成前调用并塞进卡片，否则 LLM 改写 `summary` 之后原文就找不回来了。
+    """
+    return {
+        "source_platform": platform,
+        "source_url": url,
+        "raw_description": raw_description,
+        "collected_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
 class ArticleFetcher:
     """多平台技术文章抓取器（单个平台失败不影响其他）"""
 
@@ -69,18 +82,21 @@ class ArticleFetcher:
             title = h.get("title") or h.get("story_title") or ""
             if not title:
                 continue
+            link = h.get("url") or f"https://news.ycombinator.com/item?id={h['objectID']}"
+            raw = (h.get("story_text") or "").strip()[:500]
             items.append({
                 "id": f"hn-{h['objectID']}",
                 "type": "article",
                 "title": title,
-                "summary": (h.get("story_text") or "").strip()[:500],
-                "link": h.get("url") or f"https://news.ycombinator.com/item?id={h['objectID']}",
+                "summary": raw,
+                "link": link,
                 "source": "Hacker News",
                 "score": h.get("points") or 0,
                 "comments": h.get("num_comments") or 0,
                 "published_at": h.get("created_at"),
                 "tags": [],
                 "core_concepts": [],
+                **_provenance("hackernews", link, raw),
             })
         return items
 
@@ -89,18 +105,21 @@ class ArticleFetcher:
         resp.raise_for_status()
         items = []
         for a in resp.json()[:n]:
+            link = a.get("url", "")
+            raw = a.get("description") or ""
             items.append({
                 "id": f"lob-{a.get('short_id')}",
                 "type": "article",
                 "title": a.get("title", ""),
-                "summary": a.get("description") or "",
-                "link": a.get("url", ""),
+                "summary": raw,
+                "link": link,
                 "source": "Lobsters",
                 "score": a.get("score") or 0,
                 "comments": a.get("comment_count") or 0,
                 "published_at": a.get("created_at"),
                 "tags": (a.get("tags") or [])[:4],
                 "core_concepts": [],
+                **_provenance("lobsters", link, raw),
             })
         return items
 
@@ -110,18 +129,21 @@ class ArticleFetcher:
         resp.raise_for_status()
         items = []
         for a in resp.json():
+            link = a.get("url", "")
+            raw = a.get("description") or ""
             items.append({
                 "id": f"dev-{a['id']}",
                 "type": "article",
                 "title": a.get("title", ""),
-                "summary": a.get("description") or "",
-                "link": a.get("url", ""),
+                "summary": raw,
+                "link": link,
                 "source": "dev.to",
                 "score": a.get("positive_reactions_count") or 0,
                 "comments": a.get("comments_count") or 0,
                 "published_at": a.get("published_at"),
                 "tags": (a.get("tag_list") or [])[:4],
                 "core_concepts": [],
+                **_provenance("devto", link, raw),
             })
         return items
 
@@ -133,18 +155,21 @@ class ArticleFetcher:
         resp.raise_for_status()
         items = []
         for q in resp.json().get("items", []):
+            link = q.get("link", "")
             items.append({
                 "id": f"so-{q['question_id']}",
                 "type": "article",
                 "title": q.get("title", ""),
                 "summary": "",
-                "link": q.get("link", ""),
+                "link": link,
                 "source": "Stack Overflow",
                 "score": q.get("score") or 0,
                 "comments": q.get("answer_count") or 0,
                 "published_at": datetime.fromtimestamp(q.get("creation_date", 0), tz=timezone.utc).isoformat(),
                 "tags": (q.get("tags") or [])[:4],
                 "core_concepts": [],
+                # Stack Exchange 的 question 接口不返回正文，原文只能留空（不编造）
+                **_provenance("stackoverflow", link, ""),
             })
         return items
 

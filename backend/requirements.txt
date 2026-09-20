@@ -34,6 +34,18 @@ apscheduler==3.10.4
 ## Database
 sqlalchemy>=2.0.25,<3.0.0
 psycopg2-binary>=2.9.9
+alembic>=1.13.0
+
+## Auth（阶段 2 权限边界）
+# bcrypt 必须钉在 4.0.x：4.1+ 移除了 bcrypt.__about__，passlib 1.7.4 读取时会报错
+passlib==1.7.4
+bcrypt==4.0.1
+PyJWT>=2.8.0
+email-validator>=2.1.0
+
+## Email（阶段 5 账号生命周期）：SMTP 发信（找回密码等）
+# 仅 EMAIL_PROVIDER=smtp 时才会被导入；console 模式不依赖它
+aiosmtplib>=3.0.0
 
 ## Utilities
 python-dotenv==1.0.0

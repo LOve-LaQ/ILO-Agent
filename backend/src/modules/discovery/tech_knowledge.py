@@ -2,10 +2,14 @@
 """
 累积式技术卡片知识库：
 - Qdrant 存卡片（向量 + payload，按分类标签归档，支持按分类过滤）
-- Redis 存已抓取 repo_id 集合（去重缓存，同一仓库只做一次摘要）
+- Redis 存已抓取 item_id 集合（仅为加速缓存）
 
 数据流:
-抓取 -> 去重(Redis) -> LLM 结构化摘要 -> 存入 Qdrant(累积) -> 随机/按分类读取
+抓取 -> 去重(collection_service) -> LLM 结构化摘要 -> 存入 Qdrant(累积) -> 随机/按分类读取
+
+去重的**真相源**是 PostgreSQL 的 `collection_records.item_id`（阶段 3 内容溯源），
+本模块的 `CRAWLED_SET` 只是它的镜像缓存；业务代码判断「抓过没有」请用
+`src.services.collection_service.get_collected_ids()`，不要直接读 Redis。
 """
 
 import hashlib
@@ -21,6 +25,7 @@ from qdrant_client.models import (
     PointStruct,
     Filter,
     FieldCondition,
+    MatchAny,
     MatchValue,
 )
 
@@ -58,17 +63,24 @@ class TechKnowledgeBase:
                 vectors_config=VectorParams(size=VECTOR_SIZE, distance=Distance.COSINE),
             )
 
-    # ==================== 去重（Redis） ====================
+    # ==================== 去重（Redis 镜像缓存） ====================
 
     def is_crawled(self, item_id) -> bool:
-        """检查条目（仓库/文章）是否已抓取过"""
+        """检查条目是否已抓取过（只读 Redis 缓存，不等同于真相源）
+
+        阶段 3 起去重真相源是 `collection_records`，业务代码请改用
+        `collection_service.get_collected_ids()`；这里保留给不依赖数据库的场景。
+        """
         try:
             return bool(self.redis.sismember(CRAWLED_SET, str(item_id)))
         except Exception:
             return False
 
     def mark_crawled(self, item_id):
-        """标记条目已抓取"""
+        """标记条目已抓取（只写 Redis 缓存，不落溯源表）
+
+        正常采集链路请用 `collection_service.record_item()` 双写 DB + Redis。
+        """
         try:
             self.redis.sadd(CRAWLED_SET, str(item_id))
         except Exception as e:
@@ -168,6 +180,10 @@ class TechKnowledgeBase:
                 break
         return points
 
+    def all_cards(self) -> List[Dict[str, Any]]:
+        """全量卡片 payload（历史数据回填 / 数据体检等离线任务用）"""
+        return [p.payload for p in self._scroll_all()]
+
     def sample(self, n: int, item_type: str = None) -> List[Dict[str, Any]]:
         """随机抽取 n 张卡片（可按 type 过滤：repo/article，用于「换一批」秒回）"""
         scroll_filter = None
@@ -210,3 +226,25 @@ class TechKnowledgeBase:
         if points:
             return points[0].payload
         return None
+
+    def get_by_ids(self, item_ids) -> Dict[str, Dict[str, Any]]:
+        """批量按 id 查询，返回 {item_id: payload}。
+
+        收藏列表这类「一次要 N 张卡片」的场景必须走批量：逐条 get_by_id 会变成
+        N 次 Qdrant 往返，列表一长就是几百次网络调用。
+        """
+        ids = [str(i) for i in item_ids if i]
+        if not ids:
+            return {}
+        try:
+            points, _ = self.qdrant.scroll(
+                collection_name=COLLECTION,
+                scroll_filter=Filter(must=[FieldCondition(key="id", match=MatchAny(any=ids))]),
+                limit=len(ids),
+                with_payload=True,
+                with_vectors=False,
+            )
+        except Exception as e:
+            print(f"[WARN] get_by_ids failed: {e}")
+            return {}
+        return {p.payload["id"]: p.payload for p in points if p.payload and p.payload.get("id")}

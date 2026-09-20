@@ -32,6 +32,8 @@ class GitHubFetcher:
     async def fetch_trending_repos(self, limit: int = 50, since_days: int = 7) -> List[Dict[str, Any]]:
         """抓取近 N 天创建、按 star 排序的热门仓库（自动翻页，per_page 上限 100）"""
         since = (datetime.now(timezone.utc) - timedelta(days=since_days)).strftime("%Y-%m-%d")
+        # 溯源时间统一取本次采集时刻（整批一次抓取，不逐条取 now）
+        collected_at = datetime.now(timezone.utc).isoformat()
         items = []
         page = 1
         while len(items) < limit and page <= 10:
@@ -51,12 +53,13 @@ class GitHubFetcher:
             if not batch:
                 break
             for repo in batch:
+                description = repo.get("description") or ""
                 items.append({
                     "id": f"gh-{repo['id']}",
                     "repo_id": repo["id"],
                     "type": "repo",
                     "title": repo.get("full_name", ""),
-                    "summary": repo.get("description") or "",
+                    "summary": description,
                     "link": repo.get("html_url", ""),
                     "source": "GitHub Trending",
                     "tags": [repo["language"]] if repo.get("language") else [],
@@ -65,6 +68,11 @@ class GitHubFetcher:
                     "language": repo.get("language"),
                     "created_at": repo.get("created_at"),
                     "updated_at": repo.get("updated_at"),
+                    # 溯源字段：摘要生成前必须先留下原文，否则 LLM 改写后就再也回不去了
+                    "source_platform": "github",
+                    "source_url": repo.get("html_url", ""),
+                    "raw_description": description,
+                    "collected_at": collected_at,
                 })
             page += 1
         return items[:limit]

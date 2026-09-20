@@ -2,17 +2,33 @@
 """
 资讯发现 API
 - GET /api/v1/discover/news: 获取推荐资讯列表
+- GET /api/v1/discover/articles: 获取推荐文章列表
+
+契约：
+- 所有路由声明 response_model（见 src/schemas/discover.py）
+- news / articles 采用一致的降级链：知识库 -> 缓存 -> 内置示例，用 source 字段区分
+- 业务异常统一抛 ILOException，由全局处理器归一为 {code, message, detail}
 """
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Request
 from typing import List, Dict, Any, Optional
-import asyncio
 import json
 import os
 import redis as redis_lib
 from loguru import logger
 
-router = APIRouter(prefix="/discover", tags=["Discovery"])
+from src.api.deps import OptionalUser
+from src.core.errors import ERROR_RESPONSES, ILOException
+from src.schemas.discover import (
+    CardListResponse,
+    ProvenanceResponse,
+    RefreshResponse,
+    TaggedNewsResponse,
+    TrendingResponse,
+)
+from src.services.activity_service import log_activity
+
+router = APIRouter(prefix="/discover", tags=["Discovery"], responses=ERROR_RESPONSES)
 
 
 # Redis 客户端（懒加载，用于卡片池缓存）
@@ -80,7 +96,48 @@ FALLBACK_NEWS = [
 ]
 
 
-@router.get("/news")
+# 内置示例文章 - 知识库不可用时的降级数据（保证 demo 可用）
+FALLBACK_ARTICLES = [
+    {
+        "id": "article-001",
+        "type": "article",
+        "title": "为什么 RAG 正在重塑企业知识管理",
+        "summary": "检索增强生成把大模型的推理能力与企业私有知识结合，在准确率与可解释性之间取得平衡，成为落地量最大的 AI 应用形态之一。",
+        "tags": ["ai_ml", "RAG"],
+        "core_concepts": ["retrieval", "embedding", "vector-db"],
+        "source": "Hacker News",
+        "score": 480,
+        "comments": 96,
+        "published_at": "2026-09-10T08:00:00Z"
+    },
+    {
+        "id": "article-002",
+        "type": "article",
+        "title": "PostgreSQL 还是 SQLite：中小项目的数据库选型",
+        "summary": "从并发写入、运维成本与迁移难度三个维度对比两款数据库，给出不同规模项目下的选型建议与常见误区。",
+        "tags": ["database", "PostgreSQL"],
+        "core_concepts": ["OLTP", "WAL", "concurrency"],
+        "source": "dev.to",
+        "score": 275,
+        "comments": 54,
+        "published_at": "2026-09-09T14:30:00Z"
+    },
+    {
+        "id": "article-003",
+        "type": "article",
+        "title": "把类型系统用到极致：TypeScript 的边界设计",
+        "summary": "通过条件类型、模板字面量类型与品牌类型，在编译期消灭接口误用，让重构在大型前端项目里变得安全可预测。",
+        "tags": ["frontend", "TypeScript"],
+        "core_concepts": ["conditional-types", "branded-types"],
+        "source": "Lobsters",
+        "score": 210,
+        "comments": 38,
+        "published_at": "2026-09-08T09:15:00Z"
+    }
+]
+
+
+@router.get("/news", response_model=CardListResponse)
 async def get_recommended_news(
     limit: int = 3,
     offset: int = 0
@@ -136,66 +193,95 @@ async def get_recommended_news(
     }
 
 
-@router.post("/refresh")
-async def refresh_news(limit: int = 50, force: bool = False) -> Dict[str, Any]:
+@router.post("/refresh", response_model=RefreshResponse)
+async def refresh_news(
+    user: OptionalUser, limit: int = 50, force: bool = False
+) -> Dict[str, Any]:
     """手动触发抓取 GitHub 热门仓库（自动翻页），去重后只对新仓库做摘要，存入知识库
 
     - force=True 时忽略去重，对抓到的仓库全部重新摘要并覆盖写入（用于升级摘要规范/向量）
+    - 抓取过程统一走 collection_service：批次、溯源记录、去重真相源都落在 PostgreSQL，
+      未登录也允许触发（demo 场景），此时批次不记操作人
     """
-    from src.modules.discovery.github_fetcher import GitHubFetcher, summarize_items
+    from src.modules.discovery.github_fetcher import GitHubFetcher
     from src.modules.discovery.tech_knowledge import get_knowledge_base
+    from src.services.collection_service import BATCH_TRIGGER_MANUAL, collect_items
 
     fetcher = GitHubFetcher()
     try:
-        repos = await fetcher.fetch_trending_repos(limit=limit)
-        if not repos:
-            return {
-                "status": "empty",
-                "count": 0,
-                "message": "GitHub 未返回数据，可能触发限流或网络不可达",
-            }
-
         try:
             kb = get_knowledge_base()
-            # 去重：只处理未抓过的仓库（已抓过的直接复用知识库，零 LLM 成本）；force 时全量重摘要覆盖
-            if force:
-                new_repos = list(repos)
-            else:
-                new_repos = [r for r in repos if not kb.is_crawled(r["id"])]
-            skipped = len(repos) - len(new_repos)
-
-            # 只对新仓库做结构化摘要
-            new_repos = await summarize_items(new_repos, kind="repo")
-
-            # 存入知识库 + 标记已抓
-            for r in new_repos:
-                await kb.upsert(r)
-                kb.mark_crawled(r["id"])
-
-            logger.info(f"✅ 抓取完成：新增 {len(new_repos)} 条，跳过 {skipped} 条已存在，知识库仓库共 {kb.count('repo')} 条")
-            return {
-                "status": "ok",
-                "new_count": len(new_repos),
-                "skipped_count": skipped,
-                "total_in_kb": kb.count("repo"),
-            }
         except Exception as kb_error:
             # 知识库不可用（Qdrant 未启动）时降级为 Redis 缓存
             logger.warning(f"[WARN] 知识库不可用，降级为 Redis 缓存: {kb_error}")
-            items = await summarize_items(repos)
-            save_feed_cache(items)
-            return {"status": "ok", "count": len(items), "fallback": "redis"}
+            kb = None
+
+        cached: List[Dict[str, Any]] = []
+
+        async def _store(item: Dict[str, Any]) -> None:
+            """知识库可用时写入 Qdrant，否则先收进内存待会儿落 Redis"""
+            if kb is not None:
+                await kb.upsert(item)
+            else:
+                cached.append(item)
+
+        result = await collect_items(
+            kind="repo",
+            fetch=lambda: fetcher.fetch_trending_repos(limit=limit),
+            store=_store,
+            trigger=BATCH_TRIGGER_MANUAL,
+            operator_user_id=user.id if user is not None else None,
+            params={"limit": limit, "force": force},
+            force=force,
+            # 降级路径的卡片并没进知识库，不能标记已采集，否则知识库恢复后会被永久跳过
+            persist=kb is not None,
+        )
+
+        if kb is None:
+            save_feed_cache(cached)
+            logger.info(f"✅ 抓取完成（Redis 降级）：{len(cached)} 条")
+            return {
+                "status": "ok",
+                "new_count": result.new_count,
+                "skipped_count": result.skipped_count,
+                "count": len(cached),
+                "fallback": "redis",
+                "batch_id": result.batch_id,
+            }
+
+        if result.status == "empty":
+            return {
+                "status": "empty",
+                "count": 0,
+                "message": result.message,
+                "batch_id": result.batch_id,
+            }
+
+        logger.info(
+            f"✅ 抓取完成：新增 {result.new_count} 条，跳过 {result.skipped_count} 条，"
+            f"知识库仓库共 {kb.count('repo')} 条"
+        )
+        return {
+            "status": "ok",
+            "new_count": result.new_count,
+            "skipped_count": result.skipped_count,
+            "total_in_kb": kb.count("repo"),
+            "batch_id": result.batch_id,
+        }
     except Exception as e:
         logger.error(f"❌ 抓取失败: {e}")
-        raise HTTPException(status_code=502, detail=f"抓取失败: {e}")
+        raise ILOException("REFRESH_FAILED", f"抓取失败：{e}", status_code=502)
     finally:
         await fetcher.close()
 
 
-@router.get("/articles")
+@router.get("/articles", response_model=CardListResponse)
 async def get_recommended_articles(limit: int = 3) -> Dict[str, Any]:
     """
     获取推荐文章列表（从知识库随机抽取 type=article，实现「换一批」秒回）
+
+    与 /news 一致的降级契约：知识库不可用/为空时回退到内置示例文章，
+    用 source 字段区分来源（knowledge_base | sample），不再抛 503。
 
     ## 参数
     - limit: 返回数量限制（默认 3）
@@ -205,73 +291,86 @@ async def get_recommended_articles(limit: int = 3) -> Dict[str, Any]:
         kb = get_knowledge_base()
         items = kb.sample(limit, item_type="article")
         total = kb.count("article")
-        return {
-            "items": items,
-            "count": len(items),
-            "total": total,
-            "has_more": total > limit,
-            "source": "knowledge_base",
-        }
+        if items:
+            return {
+                "items": items,
+                "count": len(items),
+                "total": total,
+                "has_more": total > limit,
+                "source": "knowledge_base",
+            }
     except Exception as e:
         logger.warning(f"[WARN] 知识库不可用: {e}")
-        raise HTTPException(status_code=503, detail=f"知识库不可用: {e}")
+
+    # 知识库为空/不可用：回退内置示例文章（保证 demo 可用）
+    sample = FALLBACK_ARTICLES[:limit]
+    return {
+        "items": sample,
+        "count": len(sample),
+        "total": len(FALLBACK_ARTICLES),
+        "has_more": len(FALLBACK_ARTICLES) > limit,
+        "source": "sample",
+    }
 
 
-@router.post("/refresh-articles")
-async def refresh_articles(per_platform: int = 10, time_range: str = "day", force: bool = False) -> Dict[str, Any]:
+@router.post("/refresh-articles", response_model=RefreshResponse)
+async def refresh_articles(
+    user: OptionalUser, per_platform: int = 10, time_range: str = "day", force: bool = False
+) -> Dict[str, Any]:
     """手动触发抓取多平台热门技术文章，去重后只对新文章做摘要，存入知识库
 
     - force=True 时忽略去重，对抓到的文章全部重新摘要并覆盖写入（用于升级摘要规范/向量）
+    - 与 /refresh 共用 collection_service，一次调用 = 一条采集批次 + 每张卡片一条溯源记录
     """
     from src.modules.discovery.article_fetcher import ArticleFetcher
-    from src.modules.discovery.github_fetcher import summarize_items
     from src.modules.discovery.tech_knowledge import get_knowledge_base
+    from src.services.collection_service import BATCH_TRIGGER_MANUAL, collect_items
 
     fetcher = ArticleFetcher()
     try:
-        articles = await fetcher.fetch_articles(per_platform=per_platform, time_range=time_range)
-        if not articles:
+        kb = get_knowledge_base()
+
+        result = await collect_items(
+            kind="article",
+            fetch=lambda: fetcher.fetch_articles(per_platform=per_platform, time_range=time_range),
+            store=kb.upsert,
+            trigger=BATCH_TRIGGER_MANUAL,
+            operator_user_id=user.id if user is not None else None,
+            params={"per_platform": per_platform, "time_range": time_range, "force": force},
+            force=force,
+        )
+
+        if result.status == "empty":
             return {
                 "status": "empty",
                 "count": 0,
-                "message": "各平台均未返回数据，可能网络不可达",
+                "message": result.message or "各平台均未返回数据，可能网络不可达",
+                "batch_id": result.batch_id,
             }
 
-        kb = get_knowledge_base()
-        # 去重：只处理未抓过的文章；force 时全量重摘要覆盖
-        if force:
-            new_articles = list(articles)
-        else:
-            new_articles = [a for a in articles if not kb.is_crawled(a["id"])]
-        skipped = len(articles) - len(new_articles)
-
-        # 只对新文章做结构化摘要
-        new_articles = await summarize_items(new_articles, kind="article")
-
-        # 存入知识库 + 标记已抓
-        for a in new_articles:
-            await kb.upsert(a)
-            kb.mark_crawled(a["id"])
-
-        logger.info(f"✅ 文章抓取完成：新增 {len(new_articles)} 条，跳过 {skipped} 条，知识库文章共 {kb.count('article')} 条")
+        logger.info(
+            f"✅ 文章抓取完成：新增 {result.new_count} 条，跳过 {result.skipped_count} 条，"
+            f"知识库文章共 {kb.count('article')} 条"
+        )
         return {
             "status": "ok",
-            "new_count": len(new_articles),
-            "skipped_count": skipped,
+            "new_count": result.new_count,
+            "skipped_count": result.skipped_count,
             "total_in_kb": kb.count("article"),
+            "batch_id": result.batch_id,
         }
     except Exception as e:
         logger.error(f"❌ 文章抓取失败: {e}")
-        raise HTTPException(status_code=502, detail=f"文章抓取失败: {e}")
+        raise ILOException("REFRESH_ARTICLES_FAILED", f"文章抓取失败：{e}", status_code=502)
     finally:
         await fetcher.close()
 
 
-@router.get("/trending")
+@router.get("/trending", response_model=TrendingResponse)
 async def get_trending_news() -> Dict[str, Any]:
     """
     获取热门趋势（按热度排序）
-    
+
     来源：GitHub Trending, Hacker News
     """
     # 按日期降序模拟热度
@@ -280,18 +379,18 @@ async def get_trending_news() -> Dict[str, Any]:
         key=lambda x: x.get("created_at", ""),
         reverse=True
     )
-    
+
     return {
         "items": sorted_news[:5],
         "updated_at": "2026-09-03T08:00:00Z"
     }
 
 
-@router.get("/by-tag/{tag}")
+@router.get("/by-tag/{tag}", response_model=TaggedNewsResponse)
 async def get_news_by_tag(tag: str, limit: int = 10) -> Dict[str, Any]:
     """
     根据标签过滤资讯
-    
+
     ## 示例
     - GET /discover/by-tag/python
     - GET /discover/by-tag/frontend
@@ -300,7 +399,7 @@ async def get_news_by_tag(tag: str, limit: int = 10) -> Dict[str, Any]:
         item for item in FALLBACK_NEWS
         if tag.lower() in [t.lower() for t in item.get("tags", [])]
     ][:limit]
-    
+
     return {
         "tag": tag,
         "items": filtered,
@@ -308,14 +407,67 @@ async def get_news_by_tag(tag: str, limit: int = 10) -> Dict[str, Any]:
     }
 
 
+@router.get("/cards/{card_id}/provenance", response_model=ProvenanceResponse)
+async def get_card_provenance(card_id: str, request: Request, user: OptionalUser) -> Dict[str, Any]:
+    """查一张卡片的内容溯源：来自哪次采集、哪个链接、摘要生成前的原文是什么
+
+    - 匿名可读（信息本身就是公开的），但不为匿名请求埋点，避免刷流量污染行为时间线
+    - 历史卡片与内置示例可能没有采集记录，此时 `known=false` 并照常返回卡片本身，
+      让前端能展示「暂无溯源信息」而不是弹错误
+    """
+    from src.services.collection_service import get_provenance
+    from src.services.card_service import find_card
+
+    record = get_provenance(card_id)
+    card = find_card(card_id)
+
+    if record is None and card is None:
+        raise ILOException(
+            "CARD_NOT_FOUND", f"卡片不存在：{card_id}", status_code=404
+        )
+
+    # 行为溯源：只有登录用户才记，匿名浏览不落流水（隐私友好，也避免噪声）
+    if user is not None:
+        log_activity(
+            "view_card",
+            user_id=user.id,
+            target_type="card",
+            target_id=card_id,
+            request=request,
+        )
+
+    if record is None:
+        return {
+            "item_id": card_id,
+            "known": False,
+            "card": card,
+        }
+
+    return {
+        "item_id": record["item_id"],
+        "known": True,
+        "source_platform": record["source_platform"],
+        "source_url": record["source_url"],
+        "raw_description": record["raw_description"],
+        "collected_at": record["collected_at"],
+        "summary_generated_at": record["summary_generated_at"],
+        "status": record["status"],
+        "backfilled": record["backfilled"],
+        "batch": record["batch"],
+        # 入库当时的快照 vs 当前卡片：覆盖写入（force 刷新）后两者会不同
+        "snapshot": record["card_payload"],
+        "card": card,
+    }
+
+
 # 测试运行
 if __name__ == "__main__":
     import requests
-    
+
     # 测试推荐接口
     resp = requests.get("http://localhost:8000/api/v1/discover/news")
     print(f"📊 Recommended: {resp.json()['count']} items")
-    
+
     # 测试热门接口
     resp = requests.get("http://localhost:8000/api/v1/discover/trending")
     print(f"🔥 Trending: {len(resp.json()['items'])} items")
