@@ -1,3 +1,4 @@
+import { useQueryClient } from '@tanstack/react-query';
 import { useCallback, useMemo, useState, type FormEvent } from 'react';
 import { Link } from 'react-router-dom';
 
@@ -7,7 +8,12 @@ import { fetchMyExport } from '../../../shared/api/me';
 import { downloadJsonFile } from '../../../shared/lib/download';
 import { fmtDateTime, fmtRelative } from '../../../shared/lib/format';
 import { changePassword, resendVerificationEmail } from '../api';
-import { useAuthSessions, useRevokeOtherSessions, useRevokeSession } from '../hooks/useAuthSessions';
+import {
+  SESSIONS_KEY,
+  useAuthSessions,
+  useRevokeOtherSessions,
+  useRevokeSession,
+} from '../hooks/useAuthSessions';
 import { useCaptchaConfig } from '../hooks/useCaptchaConfig';
 import { useAuthStore } from '../store';
 import { checkPassword, passwordStrength } from '../validation';
@@ -29,6 +35,7 @@ function isCaptchaError(code: string | undefined): boolean {
 export function AccountSecurityPage() {
   const user = useAuthStore((state) => state.user);
   const showToast = useToastStore((state) => state.show);
+  const queryClient = useQueryClient();
 
   const sessions = useAuthSessions();
   const revokeOne = useRevokeSession();
@@ -102,6 +109,8 @@ export function AccountSecurityPage() {
       setNewPassword('');
       setConfirm('');
       setCaptchaReset((value) => value + 1);
+      // 改密会撤销「其他设备」的会话，让设备列表立刻反映这次下线
+      void queryClient.invalidateQueries({ queryKey: SESSIONS_KEY });
       showToast('密码已修改');
     } catch (cause) {
       if (cause instanceof ApiError) {

@@ -9,7 +9,8 @@ import {
   type AuthSessionListResponse,
 } from '../api';
 
-const SESSIONS_KEY = ['auth', 'sessions'] as const;
+/** 「登录设备」列表的查询键：改密等其他设备被下线后需要失效它 */
+export const SESSIONS_KEY = ['auth', 'sessions'] as const;
 
 /** 登录设备列表（GET /auth/sessions） */
 export function useAuthSessions() {
