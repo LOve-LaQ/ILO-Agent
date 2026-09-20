@@ -25,7 +25,6 @@ from loguru import logger
 
 from src.api.deps import CurrentUser
 from src.core.errors import ERROR_RESPONSES, ILOException
-from src.modules.agent import LearningStateMachine
 from src.schemas.learning import (
     ChatRequest,
     ChatResponse,
@@ -63,9 +62,16 @@ state_machine = None
 
 
 def get_state_machine():
-    """获取或创建状态机实例"""
+    """获取或创建状态机实例
+
+    延迟导入 src.modules.agent：它会连带拉起 langchain / transformers / torch
+    （约 8s），而 /auth、/discover 等启动路径并不需要它。放到函数体内后，只有真正
+    调用学习接口时才付出这次导入成本，应用启动不再为它买单。
+    """
     global state_machine
     if state_machine is None:
+        from src.modules.agent import LearningStateMachine
+
         config = {
             "max_tokens": 4096,
             "num_questions": 3
