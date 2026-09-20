@@ -1,0 +1,30 @@
+.group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* 启动引导未完成时的占位，避免登录/注册按钮闪烁一下又变用户名 */
+.placeholder {
+  display: inline-block;
+  width: 96px;
+  height: 26px;
+  border-radius: 7px;
+  background: var(--chip-bg);
+}
+
+.user {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-2);
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (max-width: 640px) {
+  .user {
+    max-width: 76px;
+  }
+}

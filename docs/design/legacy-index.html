@@ -1,0 +1,664 @@
+﻿<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ILO 技术情报官 · AI 技术情报与学习助手</title>
+
+<!-- Alpine.js -->
+<script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+
+<style>
+  /* ============ Design Tokens · 干净明亮 ============ */
+  :root {
+    --bg: #f7f7f8;
+    --surface: #ffffff;
+    --border: #e9e9ec;
+    --border-strong: #dcdce0;
+    --text: #19191d;
+    --text-2: #5f5f68;
+    --text-3: #9a9aa3;
+    --brand: #5b5bd6;
+    --brand-weak: #efeffb;
+    --brand-strong: #4a4ab2;
+    --chip-bg: #f1f1f3;
+    --radius: 14px;
+    --shadow-card: 0 1px 2px rgba(24,24,27,.04), 0 1px 1px rgba(24,24,27,.03);
+    --shadow-pop: 0 12px 32px rgba(24,24,27,.12);
+    --font: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", Roboto, "Helvetica Neue", Arial, sans-serif;
+    --mono: "SF Mono", "JetBrains Mono", Consolas, "Courier New", monospace;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html { -webkit-font-smoothing: antialiased; }
+  body { font-family: var(--font); background: var(--bg); color: var(--text); font-size: 14px; line-height: 1.55; }
+  a { color: inherit; text-decoration: none; }
+  button { font-family: inherit; cursor: pointer; border: none; background: none; color: inherit; }
+  [x-cloak] { display: none !important; }
+  .wrap { max-width: 1080px; margin: 0 auto; padding: 0 24px; }
+
+  /* ============ 顶部导航 ============ */
+  .nav { position: sticky; top: 0; z-index: 20; background: rgba(255,255,255,.86); backdrop-filter: blur(12px); border-bottom: 1px solid var(--border); }
+  .nav-inner { height: 60px; display: flex; align-items: center; gap: 14px; }
+  .brand { display: flex; align-items: center; gap: 9px; font-weight: 700; font-size: 15.5px; letter-spacing: .2px; }
+  .brand-mark { width: 26px; height: 26px; border-radius: 8px; display: grid; place-items: center; background: linear-gradient(135deg, #6d6df0, #4a4ab2); color: #fff; font-size: 13px; box-shadow: 0 2px 6px rgba(91,91,214,.35); }
+  .brand-sub { color: var(--text-3); font-weight: 400; font-size: 12px; margin-left: 2px; }
+  .seg { display: flex; background: var(--chip-bg); border-radius: 10px; padding: 3px; gap: 2px; }
+  .seg button { padding: 5px 16px; border-radius: 8px; font-size: 13px; color: var(--text-2); display: flex; align-items: center; gap: 6px; font-weight: 500; }
+  .seg button.on { background: #fff; color: var(--text); box-shadow: 0 1px 2px rgba(0,0,0,.06); }
+  .seg .cnt { font-size: 11px; color: var(--text-3); background: var(--chip-bg); border-radius: 99px; padding: 0 6px; line-height: 16px; }
+  .seg button.on .cnt { background: var(--brand-weak); color: var(--brand); }
+  .nav-right { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+  .icon-btn { width: 32px; height: 32px; border-radius: 8px; display: grid; place-items: center; color: var(--text-2); transition: background .15s; font-size: 16px; }
+  .icon-btn:hover { background: var(--chip-bg); color: var(--text); }
+  .btn { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 500; padding: 6px 14px; border-radius: 9px; transition: all .15s; }
+  .btn-primary { background: var(--brand); color: #fff; }
+  .btn-primary:hover { background: var(--brand-strong); box-shadow: 0 4px 12px rgba(91,91,214,.28); }
+  .btn:disabled { opacity: .55; cursor: default; box-shadow: none; }
+  .dot-sep { width: 1px; height: 16px; background: var(--border); }
+
+  /* ============ 视图操作条 ============ */
+  .toolbar { display: flex; align-items: center; gap: 12px; padding: 20px 0 10px; }
+  .toolbar h1 { font-size: 19px; font-weight: 650; letter-spacing: .1px; }
+  .toolbar .meta { color: var(--text-3); font-size: 12.5px; margin-top: 2px; }
+  .pill-row { display: flex; gap: 6px; margin-left: auto; }
+  .pill { font-size: 12.5px; color: var(--text-2); padding: 4px 12px; border-radius: 99px; border: 1px solid var(--border); background: var(--surface); transition: all .15s; }
+  .pill:hover { border-color: var(--border-strong); }
+  .pill.on { background: var(--brand); border-color: var(--brand); color: #fff; }
+
+  /* ============ 骨架 / 空态 ============ */
+  .skeleton { padding: 40px 0; display: flex; flex-direction: column; gap: 14px; }
+  .sk-card { background: #fff; border: 1px solid var(--border); border-radius: var(--radius); height: 148px; position: relative; overflow: hidden; }
+  .sk-card::after { content: ""; position: absolute; inset: 0; background: linear-gradient(90deg, transparent, rgba(90,90,120,.06), transparent); animation: shimmer 1.4s infinite; }
+  @keyframes shimmer { 0% { transform: translateX(-100%);} 100% { transform: translateX(100%);} }
+  .empty { text-align: center; padding: 72px 0; color: var(--text-3); }
+  .empty .big { font-size: 40px; margin-bottom: 10px; }
+
+  /* ============ 卡片流 ============ */
+  .feed { padding: 12px 0 36px; }
+  .grid-2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px; }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow-card); padding: 16px 16px 13px; display: flex; flex-direction: column; gap: 10px; transition: box-shadow .18s, transform .18s, border-color .18s; }
+  .card:hover { box-shadow: var(--shadow-pop); transform: translateY(-1px); border-color: var(--border-strong); }
+  .card-head { display: flex; align-items: center; gap: 8px; min-width: 0; }
+  .lang-dot { width: 8px; height: 8px; border-radius: 3px; flex: none; }
+  .repo-name { font-weight: 650; font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .repo-name code { font-family: var(--mono); font-size: 13px; }
+  .card-head .right { margin-left: auto; display: flex; gap: 2px; flex: none; }
+  .tiny-btn { color: var(--text-3); padding: 4px; border-radius: 7px; font-size: 14px; line-height: 1; }
+  .tiny-btn:hover { background: var(--chip-bg); color: var(--text); }
+  .tiny-btn.on { color: var(--brand); }
+  .one-liner { color: var(--text-2); font-size: 13px; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; min-height: 57px; }
+  .tags { display: flex; flex-wrap: wrap; gap: 6px; }
+  .tag { font-size: 11.5px; color: var(--text-2); background: var(--chip-bg); padding: 2px 9px; border-radius: 99px; }
+  .tag.cat { color: var(--brand); background: var(--brand-weak); font-weight: 500; }
+  .card-foot { border-top: 1px solid var(--border); padding-top: 10px; margin-top: 2px; display: flex; align-items: center; gap: 12px; color: var(--text-3); font-size: 12px; }
+  .card-foot .ops { margin-left: auto; display: flex; gap: 8px; align-items: center; }
+  .mini-btn { font-size: 12px; font-weight: 500; padding: 4px 12px; border-radius: 7px; color: var(--text-2); border: 1px solid var(--border); background: #fff; transition: all .15s; }
+  .mini-btn:hover { border-color: var(--brand); color: var(--brand); }
+  .mini-btn.solid { background: var(--brand); border-color: var(--brand); color: #fff; }
+  .mini-btn.solid:hover { background: var(--brand-strong); color: #fff; }
+  .foot-metric { display: inline-flex; align-items: center; gap: 4px; }
+  .art-source { display: flex; align-items: center; gap: 7px; font-size: 11.5px; color: var(--text-3); }
+  .src-logo { width: 17px; height: 17px; border-radius: 5px; display: grid; place-items: center; font-size: 9.5px; font-weight: 700; color: #fff; letter-spacing: -.2px; flex: none; }
+  .s-hn { background: #ff6600; } .s-lob { background: #e8561b; } .s-dev { background: #2b2b2b; } .s-so { background: #e8791c; } .s-gh { background: #24292f; }
+  .art-title { font-size: 15.5px; font-weight: 650; line-height: 1.42; cursor: pointer; }
+  .art-title a:hover { color: var(--brand); }
+  .heat { display: flex; gap: 12px; font-size: 12px; color: var(--text-2); }
+  .heat span { display: inline-flex; align-items: center; gap: 4px; }
+
+  /* ============ 抓取进度遮罩 ============ */
+  .overlay { position: fixed; inset: 0; background: rgba(24,24,27,.28); backdrop-filter: blur(2px); z-index: 40; display: grid; place-items: center; }
+  .progress-card { background: var(--surface); border-radius: 16px; padding: 26px 30px; width: 300px; text-align: center; box-shadow: var(--shadow-pop); }
+  .progress-card .spin { width: 36px; height: 36px; border-radius: 50%; border: 3px solid var(--brand-weak); border-top-color: var(--brand); margin: 0 auto 14px; animation: spin 1s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .progress-card h3 { font-size: 15px; font-weight: 600; margin-bottom: 6px; }
+  .progress-card p { font-size: 12.5px; color: var(--text-3); }
+  .bar { height: 5px; background: var(--chip-bg); border-radius: 99px; overflow: hidden; margin: 12px 0 8px; }
+  .bar i { display: block; height: 100%; width: 0%; background: var(--brand); border-radius: 99px; transition: width .6s ease; }
+
+  /* ============ 学习会话抽屉 ============ */
+  .drawer { position: fixed; inset: 0 0 0 auto; z-index: 50; width: 440px; max-width: 100vw; background: var(--surface); box-shadow: var(--shadow-pop); display: flex; flex-direction: column; animation: slide-in .22s ease; }
+  @keyframes slide-in { from { transform: translateX(40px); opacity: 0; } to { transform: none; opacity: 1; } }
+  .drawer-head { padding: 15px 18px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 10px; }
+  .drawer-head .t { font-weight: 650; font-size: 15px; }
+  .drawer-head .sub { font-size: 12px; color: var(--text-3); font-weight: 400; margin-top: 1px; }
+  .drawer-head .x { margin-left: auto; }
+  .chat-body { flex: 1; overflow-y: auto; padding: 18px; display: flex; flex-direction: column; gap: 12px; background: var(--bg); }
+  .bubble { max-width: 94%; padding: 10px 14px; border-radius: 14px; font-size: 13.5px; line-height: 1.65; overflow-wrap: break-word; }
+  .bubble.ai { background: var(--surface); border: 1px solid var(--border); border-bottom-left-radius: 5px; align-self: flex-start; }
+  .bubble.me { background: var(--brand); color: #fff; border-bottom-right-radius: 5px; align-self: flex-end; }
+  .bubble :deep(pre) { white-space: pre-wrap; }
+  .bubble code { font-family: var(--mono); font-size: 12px; background: rgba(91,91,214,.1); padding: 1px 5px; border-radius: 5px; }
+  .bubble.me code { background: rgba(255,255,255,.18); }
+  .bubble pre { background: #1d1d22; color: #e8e8ea; padding: 10px 12px; border-radius: 9px; overflow-x: auto; margin: 6px 0; }
+  .bubble pre code { background: none; padding: 0; color: inherit; }
+  .typing { display: inline-flex; gap: 4px; padding: 6px 2px; }
+  .typing i { width: 6px; height: 6px; background: var(--text-3); border-radius: 50%; animation: blink 1.2s infinite; }
+  .typing i:nth-child(2) { animation-delay: .2s; } .typing i:nth-child(3) { animation-delay: .4s; }
+  @keyframes blink { 0%,80%,100% { opacity: .25; } 40% { opacity: 1; } }
+  .chat-loading { text-align: center; padding: 40px 0; color: var(--text-3); }
+  .chat-loading .spin { width: 30px; height: 30px; border-radius: 50%; border: 3px solid var(--brand-weak); border-top-color: var(--brand); margin: 0 auto 12px; animation: spin 1s linear infinite; }
+  .drawer-input { padding: 12px 14px; border-top: 1px solid var(--border); display: flex; gap: 8px; align-items: center; background: var(--surface); }
+  .drawer-input input { flex: 1; border: 1px solid var(--border); background: var(--bg); border-radius: 10px; padding: 9px 13px; font-size: 13.5px; font-family: inherit; outline: none; transition: border .15s, box-shadow .15s; }
+  .drawer-input input:focus { border-color: var(--brand); box-shadow: 0 0 0 3px rgba(91,91,214,.14); background: #fff; }
+  .drawer-input input:disabled { opacity: .6; }
+  .send { width: 34px; height: 34px; border-radius: 10px; background: var(--brand); color: #fff; display: grid; place-items: center; flex: none; }
+  .send:hover { background: var(--brand-strong); }
+  .send:disabled { opacity: .5; }
+
+  /* ============ Toast ============ */
+  .toast { position: fixed; left: 50%; bottom: 26px; transform: translateX(-50%); z-index: 60; background: #1d1d22; color: #fff; font-size: 13px; padding: 9px 18px; border-radius: 99px; box-shadow: var(--shadow-pop); opacity: 0; transition: opacity .2s, bottom .2s; pointer-events: none; }
+  .toast.show { opacity: 1; }
+
+  .foot-note { text-align: center; color: var(--text-3); font-size: 12px; padding: 10px 0 34px; }
+  @media (max-width: 860px) { .grid-2 { grid-template-columns: 1fr; } .drawer { width: 100%; } .brand-sub, .nav-right .dot-sep { display: none; } }
+</style>
+</head>
+
+<body x-data="app()" @keydown.escape.window="closeLearningModal()">
+  <!-- ================= 顶部导航 ================= -->
+  <nav class="nav">
+    <div class="wrap nav-inner">
+      <div class="brand">
+        <span class="brand-mark">I</span>
+        <span>ILO 技术情报官</span>
+        <span class="brand-sub">intelligence &amp; learning</span>
+      </div>
+
+      <div class="seg">
+        <button :class="activeTab === 'repo' && 'on'" @click="switchTab('repo')">
+          📦 仓库 <span class="cnt" x-text="countRepo ?? '–'"></span>
+        </button>
+        <button :class="activeTab === 'article' && 'on'" @click="switchTab('article')">
+          📰 文章 <span class="cnt" x-text="countArticle ?? '–'"></span>
+        </button>
+      </div>
+
+      <div class="nav-right">
+        <button class="icon-btn" title="换一批" @click="shuffleNews()" :disabled="loading">↻</button>
+        <span class="dot-sep"></span>
+        <button class="btn btn-primary" @click="refreshNews()" :disabled="refreshing">🛰 抓取最新</button>
+      </div>
+    </div>
+  </nav>
+
+  <main class="wrap">
+    <!-- 视图操作条 -->
+    <div class="toolbar">
+      <div>
+        <h1 x-text="activeTab === 'article' ? '全球技术热门文章' : '今日技术仓库'"></h1>
+        <div class="meta" x-text="activeTab === 'article'
+            ? '聚合 Hacker News · Lobsters · dev.to · Stack Overflow · 通义千问中文摘要'
+            : 'GitHub 近 7 天高星仓库 · 通义千问中文摘要'"></div>
+      </div>
+      <!-- 时间范围：仅文章视图 -->
+      <div class="pill-row" x-show="activeTab === 'article'">
+        <template x-for="r in timeRanges" :key="r.value">
+          <button class="pill" :class="timeRange === r.value && 'on'" @click="setTimeRange(r.value)" x-text="r.label"></button>
+        </template>
+      </div>
+    </div>
+
+    <!-- Loading：骨架屏 -->
+    <div x-show="loading && !refreshing" class="skeleton">
+      <template x-for="i in 4" :key="i"><div class="sk-card"></div></template>
+    </div>
+
+    <!-- 卡片流 -->
+    <div x-show="!loading && news.length > 0" class="grid-2 feed">
+      <template x-for="item in news" :key="item.id">
+        <article class="card">
+          <!-- ===== 仓库卡 ===== -->
+          <template x-if="item.type !== 'article'">
+            <div>
+              <div class="card-head">
+                <span class="lang-dot" :style="'background:' + langColor(item.language)"></span>
+                <span class="repo-name"><code x-text="item.title"></code></span>
+                <span class="right">
+                  <button class="tiny-btn" :class="isSaved(item) && 'on'" @click="saveForLater(item)" title="收藏">🔖</button>
+                  <a class="tiny-btn" :href="item.link || '#'" target="_blank" rel="noopener" title="打开原文">↗</a>
+                </span>
+              </div>
+              <p class="one-liner" x-text="item.summary || item.one_liner || '暂无摘要'" :title="(item.summary || item.one_liner || '') + '\n来源: ' + (item.link || '')"></p>
+              <div class="tags">
+                <span class="tag cat" x-show="item.category" x-text="catLabel(item.category)"></span>
+                <template x-for="tag in (item.tags || []).slice(0, 3)">
+                  <span class="tag" x-text="'#' + tag"></span>
+                </template>
+              </div>
+              <div class="card-foot">
+                <span class="foot-metric">⭐ <b x-text="fmtStars(item.stars)"></b></span>
+                <span x-text="item.language || ''"></span>
+                <span class="ops">
+                  <span class="tag cat" style="font-weight:400" x-text="item.source"></span>
+                  <button class="mini-btn solid" @click="startLearning(item)">开始学习</button>
+                </span>
+              </div>
+            </div>
+          </template>
+
+          <!-- ===== 文章卡 ===== -->
+          <template x-if="item.type === 'article'">
+            <div>
+              <div class="card-head">
+                <span class="src-logo" :class="srcLogoCls(item.source)" x-text="srcAbbr(item.source)"></span>
+                <span class="art-source" x-text="item.source"></span>
+                <span class="right">
+                  <button class="tiny-btn" :class="isSaved(item) && 'on'" @click="saveForLater(item)" title="收藏">🔖</button>
+                  <a class="tiny-btn" :href="item.link || '#'" target="_blank" rel="noopener" title="打开原文">↗</a>
+                </span>
+              </div>
+              <div class="art-title" @click="item.link && window.open(item.link, '_blank')"><a x-text="item.title"></a></div>
+              <p class="one-liner" x-text="item.summary || item.one_liner || '暂无摘要'" :title="(item.summary || item.one_liner || '') + '\n来源: ' + (item.link || '')"></p>
+              <div class="tags">
+                <span class="tag cat" x-show="item.category" x-text="catLabel(item.category)"></span>
+                <template x-for="tag in (item.tags || []).slice(0, 3)">
+                  <span class="tag" x-text="'#' + tag"></span>
+                </template>
+              </div>
+              <div class="card-foot">
+                <span class="heat">
+                  <span>🔥 <b x-text="(item.score || 0) > 0 ? item.score : 0"></b></span>
+                  <span>💬 <b x-text="(item.comments || 0) > 0 ? item.comments : 0"></b></span>
+                </span>
+                <span class="ops">
+                  <button class="mini-btn solid" @click="startLearning(item)">开始学习</button>
+                </span>
+              </div>
+            </div>
+          </template>
+        </article>
+      </template>
+    </div>
+
+    <!-- 空态 -->
+    <div x-show="!loading && news.length === 0" class="empty">
+      <div class="big">🛰</div>
+      <p>知识库还是空的，点右上角「抓取最新」拉取第一批技术卡片</p>
+    </div>
+
+    <div class="foot-note">ILO 技术情报官 · 内容由 DeepSeek 讲解 · 通义千问摘要/向量化</div>
+  </main>
+
+  <!-- ================= 抓取进度遮罩 ================= -->
+  <div x-show="refreshing" x-cloak class="overlay">
+    <div class="progress-card">
+      <div class="spin"></div>
+      <h3>正在获取最新内容</h3>
+      <div class="bar"><i :style="'width:' + (refreshStage / refreshStages.length * 100) + '%'"></i></div>
+      <p x-text="refreshStages[refreshStage]"></p>
+    </div>
+  </div>
+
+  <!-- ================= 学习会话抽屉 ================= -->
+  <div x-show="showLearningModal" x-cloak>
+    <!-- 半透明底 -->
+    <div class="overlay" style="z-index:45" @click="closeLearningModal()"></div>
+    <aside class="drawer" @click.outside="closeLearningModal()">
+      <div class="drawer-head">
+        <div style="min-width:0">
+          <div class="t" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap" x-text="(currentNewsItem && currentNewsItem.title) || '深度讲解'"></div>
+          <div class="sub">会话 <span x-text="sessionId || '…'"></span> · DeepSeek 驱动</div>
+        </div>
+        <button class="x tiny-btn" @click="closeLearningModal()">✕</button>
+      </div>
+
+      <!-- 讲解加载中 -->
+      <div x-show="learningState === 'loading'" class="chat-loading" style="flex:1">
+        <div class="spin"></div>
+        <p>正在准备讲解内容…</p>
+      </div>
+
+      <!-- 讲解文本 -->
+      <div x-show="learningState === 'explanation'" class="chat-body">
+        <div class="bubble ai" x-html="formatMessage(currentExplanation)"></div>
+        <button class="btn btn-primary" style="align-self:center; margin-top:4px" @click="startChatting()">🚀 开始提问</button>
+      </div>
+
+      <!-- 聊天模式 -->
+      <div x-show="learningState === 'chatting'" style="display:flex;flex-direction:column;flex:1;min-height:0">
+        <div class="chat-body" x-ref="chatBox">
+          <template x-for="msg in visibleMessages" :key="msg.timestamp">
+            <div :class="msg.role === 'user' ? 'bubble me' : 'bubble ai'" x-html="formatMessage(msg.content)"></div>
+          </template>
+          <div x-show="chatPending" class="bubble ai"><span class="typing"><i></i><i></i><i></i></span></div>
+        </div>
+        <div class="drawer-input">
+          <input type="text" x-model="userQuestion" @keydown.enter="sendMessage()" :disabled="chatPending || inputDisabled"
+                 placeholder="追问细节，例如：它的核心设计思路是什么？">
+          <button class="send" @click="sendMessage()" :disabled="chatPending || inputDisabled || !userQuestion.trim()">↑</button>
+        </div>
+      </div>
+    </aside>
+  </div>
+
+  <!-- Toast -->
+  <div class="toast" :class="toastMsg && 'show'" x-text="toastMsg" x-cloak></div>
+
+  <script>
+    const API = 'http://127.0.0.1:8000/api/v1';
+    const CAT_LABELS = { backend: '后端', frontend: '前端', ai_ml: 'AI/ML', devops: '运维', database: '数据库', mobile: '移动端', security: '安全', tools: '工具', other: '其他' };
+    const LANG_COLORS = { Python: '#3572A5', JavaScript: '#f1e05a', TypeScript: '#3178c6', Swift: '#f05138', Rust: '#dea584', Go: '#00ADD8', Java: '#b07219', C: '#555', 'C++': '#f34b7d', Lean: '#6c4cc4', Ruby: '#701516', 'C#': '#178600', Shell: '#89e051', Kotlin: '#A97BFF', Dart: '#00B4AB', PHP: '#4F5D95' };
+    const SRC_LOGO = { 'Hacker News': ['s-hn', 'HN'], 'Lobsters': ['s-lob', 'L'], 'dev.to': ['s-dev', 'd'], 'Stack Overflow': ['s-so', 'SO'], 'GitHub Trending': ['s-gh', 'GH'], 'GitHub': ['s-gh', 'GH'] };
+
+    const FALLBACK_NEWS = [
+      { id: 'sample-repo-1', type: 'repo', title: 'github/octo-copilot', summary: '一个开源的 AI 编程助手命令行工具，支持多模型切换与项目级上下文。', link: 'https://github.com', source: 'GitHub Trending', category: 'tools', tags: ['tools', 'Python'], stars: 23400, language: 'Python' },
+      { id: 'sample-repo-2', type: 'repo', title: 'vercel/ai-chat-ui', summary: '基于 Next.js 的 AI 对话界面组件库，十分钟搭出可用的聊天应用。', link: 'https://github.com', source: 'GitHub Trending', category: 'frontend', tags: ['frontend', 'TypeScript'], stars: 8900, language: 'TypeScript' },
+      { id: 'sample-art-1', type: 'article', title: 'LLM 推理加速的工程实践：从 KV Cache 到投机解码', summary: '系统梳理大模型推理加速的主流工程手段与各自适用场景。', link: 'https://news.ycombinator.com', source: 'Hacker News', category: 'ai_ml', tags: ['ai_ml'], score: 412, comments: 156 },
+    ];
+
+    function app() {
+      return {
+        // ---- 数据模型 ----
+        loading: true,
+        news: [],
+        activeTab: 'repo',
+        timeRange: 'day',
+        timeRanges: [
+          { value: 'day', label: '当日' },
+          { value: 'week', label: '当周' },
+          { value: 'month', label: '当月' },
+        ],
+        countRepo: null,
+        countArticle: null,
+        toastMsg: '',
+        _toastTimer: null,
+
+        // ---- 刷新 ----
+        refreshing: false,
+        refreshStage: 0,
+        refreshStages: [],
+        refreshTimer: null,
+
+        // ---- 学习 ----
+        showLearningModal: false,
+        sessionId: null,
+        currentNewsItem: null,
+        currentExplanation: '',
+        learningState: 'idle',
+        userQuestion: '',
+        chatMessages: [],
+        inputDisabled: false,
+        chatPending: false,
+
+        // ---- 初始化 ----
+        init() {
+          this.loadNews();
+          this.restoreSession();
+        },
+
+        // ---- 工具函数 ----
+        catLabel(c) { return CAT_LABELS[c] || c; },
+        langColor(l) { return LANG_COLORS[l] || '#8b8b93'; },
+        srcLogoCls(s) { return (SRC_LOGO[s] || SRC_LOGO['GitHub'])[0]; },
+        srcAbbr(s) { return (SRC_LOGO[s] || SRC_LOGO['GitHub'])[1]; },
+        fmtStars(n) { return n >= 1000 ? (n / 1000).toFixed(n >= 10000 ? 0 : 1) + 'k' : (n || 0); },
+
+        isSaved(item) {
+          try {
+            const list = JSON.parse(localStorage.getItem('ilo_bookmarks') || '[]');
+            return list.some(x => x.id === item.id);
+          } catch (e) { return false; }
+        },
+
+        // ---- 加载卡片（按 Tab 请求不同端点） ----
+        async loadNews() {
+          this.loading = true;
+          try {
+            const isArt = this.activeTab === 'article';
+            const endpoint = `${API}/discover/${isArt ? 'articles' : 'news'}?limit=6`;
+            const resp = await fetch(endpoint, { cache: 'no-cache' });
+            if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+            const data = await resp.json();
+            if (data.items && data.items.length) {
+              this.news = data.items;
+              if (isArt) this.countArticle = data.total; else this.countRepo = data.total;
+            } else {
+              this.news = [];
+            }
+          } catch (e) {
+            console.warn('后端不可用，降级到本地示例数据:', e);
+            this.news = FALLBACK_NEWS.slice();
+            if (this.activeTab === 'repo') this.countRepo = FALLBACK_NEWS.filter(x => x.type !== 'article').length;
+            else this.countArticle = FALLBACK_NEWS.filter(x => x.type === 'article').length;
+          } finally {
+            this.loading = false;
+          }
+        },
+
+        switchTab(tab) {
+          if (this.activeTab === tab) return;
+          this.activeTab = tab;
+          this.loadNews();
+        },
+
+        setTimeRange(range) {
+          if (this.timeRange === range) return;
+          this.timeRange = range;
+          this.showToast(`已切换为「${this.timeRanges.find(r => r.value === range).label}」热门`);
+        },
+
+        // ---- 换一批 ----
+        async shuffleNews() {
+          await this.loadNews();
+          this.showToast('已为你换一批内容');
+        },
+
+        // ---- 抓取最新（带进度） ----
+        async refreshNews() {
+          if (this.refreshing) return;
+          this.refreshing = true;
+          this.refreshStage = 0;
+          this.refreshStages = this.activeTab === 'article'
+            ? ['正在连接技术社区…', '正在抓取热门文章…', '通义千问提炼中文摘要…', '正在整理文章卡片…']
+            : ['正在连接 GitHub…', '正在翻页抓取热门仓库…', '通义千问提炼中文摘要…', '正在整理技术卡片…'];
+          this.refreshTimer = setInterval(() => {
+            this.refreshStage = Math.min(this.refreshStage + 1, this.refreshStages.length - 1);
+          }, 1400);
+          const t0 = Date.now();
+          try {
+            const url = this.activeTab === 'article'
+              ? `${API}/discover/refresh-articles?per_platform=8&time_range=${this.timeRange}`
+              : `${API}/discover/refresh?limit=50`;
+            const resp = await fetch(url, { method: 'POST' });
+            const data = await resp.json().catch(() => ({}));
+            this.showToast(data && data.status === 'ok'
+              ? `✅ 新增 ${data.new_count} 条，跳过 ${data.skipped_count} 条重复`
+              : '本次没有抓到新内容');
+          } catch (e) {
+            console.warn('抓取失败:', e);
+            this.showToast('⚠️ 抓取失败，已展示当前内容');
+          }
+          await this.loadNews();
+          const rest = 900 - (Date.now() - t0);
+          if (rest > 0) await new Promise(r => setTimeout(r, rest));
+          clearInterval(this.refreshTimer);
+          this.refreshing = false;
+        },
+
+        // ---- 收藏 ----
+        saveForLater(item) {
+          try {
+            const list = JSON.parse(localStorage.getItem('ilo_bookmarks') || '[]');
+            const idx = list.findIndex(x => x.id === item.id);
+            if (idx >= 0) { list.splice(idx, 1); this.showToast('已取消收藏'); }
+            else { list.push({ id: item.id, title: item.title, savedAt: Date.now() }); this.showToast('🔖 已收藏，可在 localStorage 查看'); }
+            localStorage.setItem('ilo_bookmarks', JSON.stringify(list));
+          } catch (e) { this.showToast('收藏失败'); }
+        },
+
+        showToast(msg) {
+          this.toastMsg = msg;
+          clearTimeout(this._toastTimer);
+          this._toastTimer = setTimeout(() => { this.toastMsg = ''; }, 2200);
+        },
+
+        // ---- 学习会话 ----
+        async startLearning(item) {
+          this.currentNewsItem = item;
+          this.showLearningModal = true;
+          this.learningState = 'loading';
+          this.chatMessages = [];
+          try {
+            const resp = await fetch(`${API}/learning/session`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                user_id: 'demo-user',
+                news_item_id: item.id,
+                title: item.title,
+                summary: item.summary,
+                core_concepts: item.core_concepts || [],
+                time_budget: 15,
+                preferred_depth: 'medium'
+              })
+            });
+            if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+            const data = await resp.json();
+            this.sessionId = data.session_id;
+            this.buildExplanation(item);
+            this.learningState = 'explanation';
+          } catch (e) {
+            console.error('创建学习会话失败，使用本地讲解:', e);
+            this.sessionId = null;
+            this.buildExplanation(item);
+            this.learningState = 'explanation';
+          }
+        },
+
+        // 基于卡片结构化字段生成开场讲解（本地模板，零成本；提问阶段走 DeepSeek）
+        buildExplanation(item) {
+          const title = item.title || '该技术';
+          const one = item.one_liner || item.summary || '';
+          const tags = (item.tags || []).filter(t => !(CAT_LABELS[t] || t === item.category)).slice(0, 4);
+          const hl = item.highlights || [];
+          const stack = item.tech_stack || [];
+          const uc = item.use_cases || [];
+          const meta = [];
+          if (item.stars) meta.push(`⭐ **${this.fmtStars(item.stars)}** stars`);
+          if (item.language) meta.push(`语言 **${item.language}**`);
+          if (item.score) meta.push(`社区热度 **${item.score}**`);
+          const lines = [];
+          lines.push(`## ${title}`);
+          lines.push('');
+          if (meta.length) lines.push(`> ${meta.join(' · ')}`);
+          if (one) lines.push(`> ${one}`);
+          if (item.category) lines.push(`\n**分类**：${this.catLabel(item.category)}`);
+          if (hl.length) { lines.push('\n### 🔑 亮点'); hl.slice(0, 3).forEach(h => lines.push(`- ${h}`)); }
+          if (stack.length) { lines.push('\n### 🧰 技术栈'); lines.push(stack.slice(0, 6).join(' · ')); }
+          if (uc.length) { lines.push('\n### 🎯 适合谁'); uc.slice(0, 2).forEach(u => lines.push(`- ${u}`)); }
+          lines.push('\n### 🚀 下一步');
+          lines.push('你可以点「开始提问」追问它的原理、代码实现或应用场景，我会结合这份卡片用大白话给你讲透。');
+          this.currentExplanation = lines.join('\n');
+          this.chatMessages = [{ role: 'system', content: this.currentExplanation, timestamp: Date.now() }];
+        },
+
+        startChatting() {
+          this.learningState = 'chatting';
+          this.persistSession();
+          this.$nextTick(() => this.scrollChat());
+        },
+
+        async sendMessage() {
+          const q = this.userQuestion.trim();
+          if (!q || this.chatPending) return;
+          this.userQuestion = '';
+          this.chatPending = true;
+          this.pushMsg('user', q);
+          this.$nextTick(() => this.scrollChat());
+          try {
+            const history = this.chatMessages.filter(m => m.role !== 'system').map(m => ({ role: m.role, content: m.content }));
+            const resp = await fetch(`${API}/learning/chat`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                session_id: this.sessionId,
+                message: q,
+                conversation_history: history.slice(-10)
+              })
+            });
+            if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+            const data = await resp.json();
+            this.pushMsg('assistant', data.response);
+            this.persistSession();
+          } catch (e) {
+            console.warn('AI 回答失败，本地兜底:', e);
+            this.pushMsg('assistant', this.fallbackAnswer(q));
+          }
+          this.chatPending = false;
+          this.$nextTick(() => this.scrollChat());
+        },
+
+        pushMsg(role, content) {
+          this.chatMessages.push({ role, content, timestamp: Date.now() + Math.random() });
+        },
+
+        get visibleMessages() {
+          return this.chatMessages.filter(m => m.role !== 'system');
+        },
+
+        fallbackAnswer(q) {
+          const t = (this.currentNewsItem && this.currentNewsItem.title) || '这个话题';
+          if (q.includes('什么') || q.includes('定义')) return `**${t}** 是一类偏工程实践的技术主题。它的价值在于解决实际开发中的具体问题——建议你结合卡片里的「亮点」逐条理解，再去看原文展开细节。`;
+          if (q.includes('如何') || q.includes('怎么')) return `要上手 **${t}**，建议路径：\n\n1. 先读官方文档的 Quickstart\n2. 复刻一个最小可运行示例\n3. 再对照卡片里的「技术栈」逐项深入。`;
+          if (q.includes('为什么')) return `**${t}** 之所以被关注，通常是因为它在性能、可维护性或生态上做出了取舍，具体权衡要看原仓库/原文的 Issues 与设计文档。`;
+          return `这是个很好的问题！关于 **${t}**，你可以先从它的核心定位（one-liner）入手，再结合标签与讨论区了解更多。`;
+        },
+
+        // ---- Markdown 简易渲染 ----
+        formatMessage(text) {
+          if (!text) return '';
+          let s = text
+            .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+            .replace(/```([\s\S]*?)```/g, (m, code) => `<pre><code>${code.trim()}</code></pre>`)
+            .replace(/^### (.*)$/gm, '<h3 style="font-size:14px;font-weight:700;margin:10px 0 4px">$1</h3>')
+            .replace(/^## (.*)$/gm, '<h2 style="font-size:16px;font-weight:700;margin:4px 0 6px">$1</h2>')
+            .replace(/^> (.*)$/gm, '<blockquote style="border-left:3px solid #c7c7f0;padding-left:10px;margin:6px 0;color:#666">$1</blockquote>')
+            .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+            .replace(/`([^`]+)`/g, '<code>$1</code>');
+          s = s.replace(/\n/g, '<br>').replace(/<br>\s*<br>/g, '<br>');
+          return s;
+        },
+
+        scrollChat() {
+          const box = this.$refs.chatBox;
+          if (box) box.scrollTop = box.scrollHeight;
+        },
+
+        // ---- 会话持久化（刷新/重启后端不丢） ----
+        persistSession() {
+          if (!this.sessionId) return;
+          try {
+            localStorage.setItem('ilo_active_session', JSON.stringify({
+              sessionId: this.sessionId,
+              newsItem: this.currentNewsItem,
+              explanation: this.currentExplanation,
+              chatMessages: this.chatMessages
+            }));
+          } catch (e) { /* ignore */ }
+        },
+
+        // 刷新后恢复上次学习会话
+        restoreSession() {
+          try {
+            const raw = localStorage.getItem('ilo_active_session');
+            if (!raw) return;
+            const saved = JSON.parse(raw);
+            if (!saved || !saved.sessionId || !saved.newsItem) return;
+            this.sessionId = saved.sessionId;
+            this.currentNewsItem = saved.newsItem;
+            this.currentExplanation = saved.explanation || '';
+            this.chatMessages = saved.chatMessages || [];
+            this.learningState = 'chatting';
+            this.showLearningModal = true;
+          } catch (e) { /* ignore */ }
+        },
+
+        closeLearningModal() {
+          this.showLearningModal = false;
+          this.learningState = 'idle';
+        }
+      };
+    }
+  </script>
+</body>
+</html>

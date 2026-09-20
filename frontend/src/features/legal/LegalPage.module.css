@@ -1,0 +1,120 @@
+.page {
+  min-height: 100vh;
+  padding: 40px 24px 64px;
+}
+
+.doc {
+  max-width: 760px;
+  margin: 0 auto;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 36px 32px;
+  line-height: 1.75;
+  color: var(--text);
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  font-weight: 700;
+  font-size: 15px;
+  margin-bottom: 18px;
+}
+
+.brandMark {
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
+  display: grid;
+  place-items: center;
+  background: linear-gradient(135deg, #6d6df0, #4a4ab2);
+  color: #fff;
+  font-size: 13px;
+}
+
+.title {
+  font-size: 24px;
+  font-weight: 700;
+  letter-spacing: -0.3px;
+}
+
+.updated {
+  margin-top: 6px;
+  font-size: 12.5px;
+  color: var(--text-3);
+}
+
+.doc h2 {
+  font-size: 16px;
+  font-weight: 700;
+  margin: 28px 0 10px;
+}
+
+.doc h3 {
+  font-size: 14px;
+  font-weight: 600;
+  margin: 18px 0 8px;
+}
+
+.doc p {
+  margin: 10px 0;
+  font-size: 14px;
+  color: var(--text-2);
+}
+
+.doc ul {
+  margin: 10px 0;
+  padding-left: 22px;
+}
+
+.doc li {
+  font-size: 14px;
+  color: var(--text-2);
+  margin: 6px 0;
+}
+
+.doc table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 12px 0;
+  font-size: 13.5px;
+}
+
+.doc th,
+.doc td {
+  border: 1px solid var(--border);
+  padding: 8px 10px;
+  text-align: left;
+  vertical-align: top;
+  color: var(--text-2);
+}
+
+.doc th {
+  background: var(--brand-weak);
+  color: var(--text);
+  font-weight: 600;
+}
+
+.note {
+  margin-top: 24px;
+  padding: 12px 14px;
+  border: 1px dashed var(--border-strong);
+  border-radius: 10px;
+  font-size: 12.5px;
+  color: var(--text-3);
+}
+
+.foot {
+  margin-top: 26px;
+  font-size: 13px;
+}
+
+.foot a {
+  color: var(--brand);
+}
+
+.foot a:hover {
+  text-decoration: underline;
+}

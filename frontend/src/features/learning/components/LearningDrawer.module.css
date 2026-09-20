@@ -1,0 +1,143 @@
+/* 学习会话抽屉 */
+.drawer {
+  position: fixed;
+  inset: 0 0 0 auto;
+  z-index: 50;
+  width: 440px;
+  max-width: 100vw;
+  background: var(--surface);
+  box-shadow: var(--shadow-pop);
+  display: flex;
+  flex-direction: column;
+  animation: slide-in 0.22s ease;
+}
+
+@keyframes slide-in {
+  from {
+    transform: translateX(40px);
+    opacity: 0;
+  }
+  to {
+    transform: none;
+    opacity: 1;
+  }
+}
+
+.drawerHead {
+  padding: 15px 18px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.title {
+  font-weight: 650;
+  font-size: 15px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sub {
+  font-size: 12px;
+  color: var(--text-3);
+  font-weight: 400;
+  margin-top: 1px;
+}
+
+.close {
+  margin-left: auto;
+}
+
+.chatBody {
+  flex: 1;
+  overflow-y: auto;
+  padding: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  background: var(--bg);
+}
+
+.chatLoading {
+  flex: 1;
+  text-align: center;
+  padding: 40px 0;
+  color: var(--text-3);
+}
+
+/* 压缩抽屉内加载圈的尺寸（全局 .spin 为 36px） */
+.chatLoading :global(.spin) {
+  width: 30px;
+  height: 30px;
+  margin: 0 auto 12px;
+}
+
+.chatting {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+.startChat {
+  align-self: center;
+  margin-top: 4px;
+}
+
+.drawerInput {
+  padding: 12px 14px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  background: var(--surface);
+}
+
+.drawerInput input {
+  flex: 1;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  border-radius: 10px;
+  padding: 9px 13px;
+  font-size: 13.5px;
+  font-family: inherit;
+  outline: none;
+  transition: border 0.15s, box-shadow 0.15s;
+}
+
+.drawerInput input:focus {
+  border-color: var(--brand);
+  box-shadow: 0 0 0 3px rgba(91, 91, 214, 0.14);
+  background: #fff;
+}
+
+.drawerInput input:disabled {
+  opacity: 0.6;
+}
+
+.send {
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  background: var(--brand);
+  color: #fff;
+  display: grid;
+  place-items: center;
+  flex: none;
+}
+
+.send:hover {
+  background: var(--brand-strong);
+}
+
+.send:disabled {
+  opacity: 0.5;
+}
+
+@media (max-width: 860px) {
+  .drawer {
+    width: 100%;
+  }
+}

@@ -1,0 +1,25 @@
+/* ============ Design Tokens · 干净明亮 ============ */
+/* 从原 frontend/index.html 的 :root 原样迁移，变量名与数值保持不变，保证视觉零回归 */
+:root {
+  --bg: #f7f7f8;
+  --surface: #ffffff;
+  --border: #e9e9ec;
+  --border-strong: #dcdce0;
+  --text: #19191d;
+  --text-2: #5f5f68;
+  --text-3: #9a9aa3;
+  --brand: #5b5bd6;
+  --brand-weak: #efeffb;
+  --brand-strong: #4a4ab2;
+  --chip-bg: #f1f1f3;
+  /* 错误 / 危险态：表单校验与接口报错（登录注册首用，故在此补入设计系统） */
+  --danger: #d0453b;
+  --danger-weak: #fdf1f0;
+  --danger-border: #f0cdc9;
+  --radius: 14px;
+  --shadow-card: 0 1px 2px rgba(24, 24, 27, 0.04), 0 1px 1px rgba(24, 24, 27, 0.03);
+  --shadow-pop: 0 12px 32px rgba(24, 24, 27, 0.12);
+  --font: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', Roboto,
+    'Helvetica Neue', Arial, sans-serif;
+  --mono: 'SF Mono', 'JetBrains Mono', Consolas, 'Courier New', monospace;
+}

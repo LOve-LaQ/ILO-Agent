@@ -1,0 +1,6 @@
+.footNote {
+  text-align: center;
+  color: var(--text-3);
+  font-size: 12px;
+  padding: 10px 0 34px;
+}

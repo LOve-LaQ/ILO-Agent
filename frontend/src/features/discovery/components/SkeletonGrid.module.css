@@ -1,0 +1,33 @@
+/* 首屏骨架屏 */
+.skeleton {
+  padding: 40px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.skCard {
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  height: 148px;
+  position: relative;
+  overflow: hidden;
+}
+
+.skCard::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent, rgba(90, 90, 120, 0.06), transparent);
+  animation: shimmer 1.4s infinite;
+}
+
+@keyframes shimmer {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(100%);
+  }
+}

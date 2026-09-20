@@ -1,0 +1,16 @@
+/* 卡片流：双列网格 */
+.feed {
+  padding: 12px 0 36px;
+}
+
+.grid2 {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 14px;
+}
+
+@media (max-width: 860px) {
+  .grid2 {
+    grid-template-columns: 1fr;
+  }
+}

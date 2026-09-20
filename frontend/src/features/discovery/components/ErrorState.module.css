@@ -1,0 +1,15 @@
+/* 显式错误态：替代原 index.html 的前端硬编码兜底数据（FALLBACK_NEWS） */
+.error {
+  text-align: center;
+  padding: 72px 0;
+  color: var(--text-3);
+}
+
+.big {
+  font-size: 40px;
+  margin-bottom: 10px;
+}
+
+.msg {
+  margin-bottom: 16px;
+}

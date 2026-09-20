@@ -1,0 +1,38 @@
+/* 区块级状态提示（空态 / 错误态 / 加载中） */
+
+.note,
+.danger,
+.loading {
+  text-align: center;
+  color: var(--text-3);
+  padding: 56px 0;
+}
+
+.big {
+  font-size: 36px;
+  margin-bottom: 10px;
+}
+
+.title {
+  font-size: 14px;
+  color: var(--text-2);
+}
+
+.hint {
+  margin-top: 6px;
+  font-size: 12.5px;
+}
+
+.note button,
+.danger button {
+  margin-top: 16px;
+}
+
+.danger .title {
+  color: var(--danger);
+}
+
+.loading p {
+  font-size: 13px;
+  color: var(--text-3);
+}

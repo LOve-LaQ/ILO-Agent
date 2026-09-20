@@ -1,0 +1,293 @@
+/* 登录 / 注册页共用样式（同一套卡片 + 表单，两个页面共享类名） */
+
+.page {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 40px 24px;
+}
+
+.card {
+  width: 100%;
+  max-width: 400px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-pop);
+  padding: 30px 28px 24px;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  font-weight: 700;
+  font-size: 15px;
+  letter-spacing: 0.2px;
+  margin-bottom: 20px;
+}
+
+.brandMark {
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
+  display: grid;
+  place-items: center;
+  background: linear-gradient(135deg, #6d6df0, #4a4ab2);
+  color: #fff;
+  font-size: 13px;
+  box-shadow: 0 2px 6px rgba(91, 91, 214, 0.35);
+}
+
+.title {
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: -0.2px;
+}
+
+.sub {
+  margin-top: 6px;
+  font-size: 13px;
+  color: var(--text-2);
+}
+
+/* ============ 表单 ============ */
+.form {
+  margin-top: 20px;
+  display: grid;
+  gap: 14px;
+}
+
+.field {
+  display: grid;
+  gap: 6px;
+}
+
+.label {
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--text-2);
+}
+
+.input {
+  width: 100%;
+  font: inherit;
+  font-size: 14px;
+  padding: 9px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--border-strong);
+  background: var(--surface);
+  color: var(--text);
+  transition:
+    border-color 0.15s,
+    box-shadow 0.15s;
+}
+
+.input:focus {
+  outline: none;
+  border-color: var(--brand);
+  box-shadow: 0 0 0 3px var(--brand-weak);
+}
+
+.input[aria-invalid='true'] {
+  border-color: var(--danger);
+}
+
+.input:focus.input[aria-invalid='true'] {
+  box-shadow: 0 0 0 3px var(--danger-weak);
+}
+
+.hint {
+  font-size: 12px;
+  color: var(--text-3);
+}
+
+.fieldError {
+  font-size: 12px;
+  color: var(--danger);
+}
+
+.alert {
+  background: var(--danger-weak);
+  border: 1px solid var(--danger-border);
+  color: var(--danger);
+  border-radius: 10px;
+  padding: 9px 12px;
+  font-size: 13px;
+}
+
+.submit {
+  width: 100%;
+  justify-content: center;
+  padding: 10px 14px;
+  font-size: 14px;
+  margin-top: 2px;
+}
+
+/* ============ 底部链接 ============ */
+.foot {
+  margin-top: 18px;
+  text-align: center;
+  font-size: 13px;
+  color: var(--text-2);
+}
+
+.foot a {
+  color: var(--brand);
+  font-weight: 500;
+}
+
+.foot a:hover {
+  text-decoration: underline;
+}
+
+.quietFoot {
+  margin-top: 10px;
+  text-align: center;
+  font-size: 12.5px;
+}
+
+.quietFoot a {
+  color: var(--text-3);
+}
+
+.quietFoot a:hover {
+  color: var(--text-2);
+}
+
+/* ============ 人机校验 ============ */
+/* VAPTCHA V4 的 container 只是挂载锚点：SDK 不会向内注入可见内容（挑战以独立弹层呈现），
+   因此这里不占高度，避免页面上留下一个空白框。 */
+.captchaBox {
+  height: 0;
+  overflow: hidden;
+}
+
+.captchaRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* ============ 密码强度条 ============ */
+.strength {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.strengthBar {
+  flex: 1;
+  height: 5px;
+  border-radius: 999px;
+  background: var(--border);
+  overflow: hidden;
+}
+
+.strengthFill {
+  height: 100%;
+  border-radius: 999px;
+  transition: width 0.2s ease, background 0.2s ease;
+}
+
+.strengthFill[data-score='0'] {
+  background: var(--danger);
+}
+
+.strengthFill[data-score='1'] {
+  background: var(--danger);
+}
+
+.strengthFill[data-score='2'] {
+  background: #d99a2b;
+}
+
+.strengthFill[data-score='3'] {
+  background: #3f9d63;
+}
+
+.strengthFill[data-score='4'] {
+  background: #2f8f57;
+}
+
+.strengthLabel {
+  font-size: 12px;
+  color: var(--text-3);
+  min-width: 2.5em;
+  text-align: right;
+}
+
+/* ============ 协议勾选 ============ */
+.checkboxRow {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 12.5px;
+  color: var(--text-2);
+  line-height: 1.5;
+}
+
+.checkboxRow input[type='checkbox'] {
+  margin-top: 2px;
+  width: 15px;
+  height: 15px;
+  flex-shrink: 0;
+  accent-color: var(--brand);
+}
+
+.checkboxRow a {
+  color: var(--brand);
+}
+
+.checkboxRow a:hover {
+  text-decoration: underline;
+}
+
+/* ============ 成功提示 ============ */
+.notice {
+  background: var(--brand-weak);
+  border: 1px solid var(--brand-weak);
+  color: var(--text);
+  border-radius: 10px;
+  padding: 9px 12px;
+  font-size: 13px;
+}
+
+/* ============ 宽卡片（改密 / 注销 / 设备管理） ============ */
+.wideCard {
+  max-width: 520px;
+}
+
+.inlineActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 4px;
+}
+
+.infoList {
+  display: grid;
+  gap: 10px;
+  margin-top: 4px;
+}
+
+.infoRow {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 13px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+
+.infoRow small {
+  color: var(--text-3);
+}
+
+.muted {
+  font-size: 12.5px;
+  color: var(--text-3);
+}
+

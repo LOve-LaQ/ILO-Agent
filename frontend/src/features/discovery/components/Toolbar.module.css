@@ -1,0 +1,44 @@
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 20px 0 10px;
+}
+
+.toolbar h1 {
+  font-size: 19px;
+  font-weight: 650;
+  letter-spacing: 0.1px;
+}
+
+.meta {
+  color: var(--text-3);
+  font-size: 12.5px;
+  margin-top: 2px;
+}
+
+.pillRow {
+  display: flex;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.pill {
+  font-size: 12.5px;
+  color: var(--text-2);
+  padding: 4px 12px;
+  border-radius: 99px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  transition: all 0.15s;
+}
+
+.pill:hover {
+  border-color: var(--border-strong);
+}
+
+.pill.on {
+  background: var(--brand);
+  border-color: var(--brand);
+  color: #fff;
+}
