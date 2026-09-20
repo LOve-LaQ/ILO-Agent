@@ -20,6 +20,7 @@ from loguru import logger
 from src.api.deps import OptionalUser
 from src.core.errors import ERROR_RESPONSES, ILOException
 from src.schemas.discover import (
+    CardContentResponse,
     CardListResponse,
     ProvenanceResponse,
     RefreshResponse,
@@ -203,7 +204,7 @@ async def refresh_news(
     - 抓取过程统一走 collection_service：批次、溯源记录、去重真相源都落在 PostgreSQL，
       未登录也允许触发（demo 场景），此时批次不记操作人
     """
-    from src.modules.discovery.github_fetcher import GitHubFetcher
+    from src.modules.discovery.github_fetcher import GitHubFetcher, attach_readmes
     from src.modules.discovery.tech_knowledge import get_knowledge_base
     from src.services.collection_service import BATCH_TRIGGER_MANUAL, collect_items
 
@@ -235,6 +236,8 @@ async def refresh_news(
             force=force,
             # 降级路径的卡片并没进知识库，不能标记已采集，否则知识库恢复后会被永久跳过
             persist=kb is not None,
+            # 新卡的 README 原文快照：在去重之后执行，只为真正入库的卡片付费
+            enrich=attach_readmes,
         )
 
         if kb is None:
@@ -458,6 +461,19 @@ async def get_card_provenance(card_id: str, request: Request, user: OptionalUser
         "snapshot": record["card_payload"],
         "card": card,
     }
+
+
+@router.get("/cards/{card_id}/content", response_model=CardContentResponse)
+async def get_card_content(card_id: str) -> Dict[str, Any]:
+    """读一张卡片的原文（仓库 README）快照，「先读原文」页的数据来源
+
+    - 匿名可读：README 本身就是公开内容，读原文不该被登录墙拦住（提问才需要登录）
+    - 本地没有快照（存量卡片）时按需补抓一次并回写，之后零延迟
+    - 抓不到时返回 `origin=unavailable` 并带上 fallback_description，由前端优雅降级
+    """
+    from src.services.collection_service import get_or_fetch_card_content
+
+    return await get_or_fetch_card_content(card_id)
 
 
 # 测试运行

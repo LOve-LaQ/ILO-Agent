@@ -3,10 +3,11 @@
 - CardListResponse: GET /discover/news 与 /discover/articles 的统一响应
 - RefreshResponse: POST /discover/refresh 与 /discover/refresh-articles 的响应
 - ProvenanceResponse: GET /discover/cards/{card_id}/provenance 的内容溯源响应
+- CardContentResponse: GET /discover/cards/{card_id}/content 的原文快照响应
 """
 
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -98,3 +99,42 @@ class ProvenanceResponse(BaseModel):
     batch: Optional[ProvenanceBatch] = None
     snapshot: Optional[TechCard] = Field(None, description="入库当时的卡片快照")
     card: Optional[TechCard] = Field(None, description="当前知识库/缓存里的卡片（可能已被覆盖）")
+
+
+# ==================== 原文快照（「先读原文」） ====================
+
+
+class CardContentMeta(BaseModel):
+    """原文快照的版本信息（回答「读的是哪个版本」）"""
+
+    path: Optional[str] = Field(None, description="README 文件名，如 README.md")
+    sha: Optional[str] = Field(
+        None, description="git blob sha；raw CDN 兜底路径拿不到时为 null"
+    )
+    size: Optional[int] = Field(None, description="原始字节数（截断前）")
+    source: Optional[str] = Field(None, description="github-api | raw-cdn")
+    truncated: bool = Field(False, description="是否因超出字符上限而截断")
+    fetched_at: Optional[str] = Field(None, description="获取时间（ISO 8601）")
+
+
+class CardContentResponse(BaseModel):
+    """GET /discover/cards/{card_id}/content 响应（匿名可读）
+
+    `origin` 决定前端展示方式：
+    - snapshot：本地已有快照，直接渲染 content
+    - on_demand：本次实时补抓并已回写，后续请求会变成 snapshot
+    - unavailable：抓不到原文（非 GitHub 仓库 / 无 README / 网络失败），退回 fallback_description
+    """
+
+    card_id: str
+    source_url: Optional[str] = None
+    source_platform: Optional[str] = None
+    content: Optional[str] = Field(
+        None, description="仓库 README 原文（Markdown），超出上限会被截断"
+    )
+    truncated: bool = False
+    meta: Optional[CardContentMeta] = None
+    fallback_description: Optional[str] = Field(
+        None, description="抓不到原文时的兜底展示：采集时的原始简介"
+    )
+    origin: Literal["snapshot", "on_demand", "unavailable"] = "unavailable"
