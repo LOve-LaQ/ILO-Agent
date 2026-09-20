@@ -20,7 +20,7 @@ from datetime import datetime, timezone
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Sequence, Set, Union
 
 from loguru import logger
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from src.core.db import get_session_factory, is_database_configured
@@ -272,6 +272,9 @@ def build_provenance(item: Dict[str, Any], *, status: str = "summarized") -> Dic
         "source_url": item.get("source_url") or item.get("link"),
         # raw_description 缺失时退回 summary：对老卡片是近似值，由 backfilled 标记诚实标注
         "raw_description": item.get("raw_description") or item.get("summary"),
+        # 原文快照由 attach_readmes 挂在卡片上；没抓到就是 None，不编造
+        "raw_content": item.get("raw_content"),
+        "content_meta": item.get("content_meta"),
         "status": status,
     }
 
@@ -287,7 +290,8 @@ def record_item(
 
     `item_id` 唯一，因此 force 重摘要走 ON CONFLICT 覆盖：
     - `collected_at` 保留首次采集时间（不改），`summary_generated_at` 刷新；
-    - `raw_description` 只在原值为空时补齐，避免被 LLM 改写后的 summary 污染。
+    - `raw_description` 只在原值为空时补齐，避免被 LLM 改写后的 summary 污染；
+    - `raw_content` 同 `raw_description`：快照一旦落定就不再改写，保证可回溯。
     """
     if not is_database_configured():
         return
@@ -309,6 +313,8 @@ def record_item(
                 source_platform=prov["source_platform"],
                 source_url=prov["source_url"],
                 raw_description=prov["raw_description"],
+                raw_content=prov["raw_content"],
+                content_meta=prov["content_meta"],
                 collected_at=_now(),
                 summary_generated_at=_now() if status == "summarized" else None,
                 card_payload=item,
@@ -323,6 +329,14 @@ def record_item(
                     "source_url": stmt.excluded.source_url,
                     "raw_description": func.coalesce(
                         CollectionRecord.raw_description, stmt.excluded.raw_description
+                    ),
+                    # 原文快照同样「首次写入即定稿」：force 重摘要不会改写已有的
+                    # README 快照，保证「采集时刻的原文」始终可回溯
+                    "raw_content": func.coalesce(
+                        CollectionRecord.raw_content, stmt.excluded.raw_content
+                    ),
+                    "content_meta": func.coalesce(
+                        CollectionRecord.content_meta, stmt.excluded.content_meta
                     ),
                     "summary_generated_at": stmt.excluded.summary_generated_at,
                     "card_payload": stmt.excluded.card_payload,
@@ -430,6 +444,93 @@ def backfill_records(
         return stats
 
 
+# ==================== 原文快照（「先读原文」） ====================
+
+
+def _content_payload(record: Optional[CollectionRecord], item_id: str) -> Dict[str, Any]:
+    """把采集记录转成原文响应（origin 由调用方判定）"""
+    meta = (record.content_meta or {}) if record is not None else {}
+    return {
+        "card_id": item_id,
+        "source_url": record.source_url if record is not None else None,
+        "source_platform": record.source_platform if record is not None else None,
+        "fallback_description": record.raw_description if record is not None else None,
+        "content": record.raw_content if record is not None else None,
+        "truncated": bool(meta.get("truncated")),
+        "meta": meta or None,
+        "origin": "unavailable",
+    }
+
+
+def _write_content_snapshot(item_id: str, content: str, meta: Dict[str, Any]) -> None:
+    """把按需补抓的结果回写成快照。
+
+    条件带 `raw_content IS NULL`：并发打开同一张卡片时会各抓一次，但只有第一个
+    写入生效 —— 后到的不会把先落定的快照冲掉。
+    """
+    try:
+        with get_session_factory()() as session:
+            session.execute(
+                update(CollectionRecord)
+                .where(
+                    CollectionRecord.item_id == item_id,
+                    CollectionRecord.raw_content.is_(None),
+                )
+                .values(raw_content=content, content_meta=meta)
+            )
+            session.commit()
+    except Exception as e:  # noqa: BLE001 - 回写失败不影响本次返回
+        logger.warning(f"[WARN] 回写原文快照失败: {item_id} - {e}")
+
+
+async def get_or_fetch_card_content(item_id: str) -> Dict[str, Any]:
+    """读一张卡片的原文（README）快照，缺失时按需补抓一次。
+
+    三种来源，用 `origin` 区分，前端据此决定展示方式：
+    - `snapshot`    本地已有快照（refresh 时预取的成果）→ 零网络开销直接返回
+    - `on_demand`   存量卡片没有快照 → 实时抓一次并回写，再打开就走 snapshot
+    - `unavailable` 抓不到（非 GitHub 仓库 / 无 README / 网络失败）→ 退回 raw_description
+
+    读取路径全部吞异常：原文是锦上添花，不该让卡片详情页炸掉。
+    """
+    if not is_database_configured():
+        return _content_payload(None, item_id)
+
+    from src.modules.discovery.github_fetcher import fetch_readme_standalone, repo_full_name
+
+    try:
+        with get_session_factory()() as session:
+            record = session.execute(
+                select(CollectionRecord).where(CollectionRecord.item_id == item_id)
+            ).scalar_one_or_none()
+    except Exception as e:  # noqa: BLE001 - 读原文失败不该让页面炸掉
+        logger.warning(f"[WARN] 读取卡片原文失败: {item_id} - {e}")
+        return _content_payload(None, item_id)
+
+    payload = _content_payload(record, item_id)
+    if record is None:
+        return payload
+    if record.raw_content:
+        return {**payload, "origin": "snapshot"}
+
+    full_name = repo_full_name(record.source_url)
+    if not full_name:
+        return payload
+
+    fetched = await fetch_readme_standalone(full_name)
+    if not fetched:
+        return payload
+
+    _write_content_snapshot(item_id, fetched["content"], fetched["meta"])
+    return {
+        **payload,
+        "content": fetched["content"],
+        "meta": fetched["meta"],
+        "truncated": bool(fetched["meta"].get("truncated")),
+        "origin": "on_demand",
+    }
+
+
 # ==================== 编排 ====================
 
 @dataclass
@@ -462,6 +563,7 @@ async def collect_items(
     force: bool = False,
     summarize: bool = True,
     persist: bool = True,
+    enrich: Optional[Callable[[List[Dict[str, Any]]], Awaitable[List[Dict[str, Any]]]]] = None,
 ) -> CollectResult:
     """抓取 -> 去重 -> 摘要 -> 入库 -> 记录溯源 的统一编排
 
@@ -474,6 +576,8 @@ async def collect_items(
         persist: False 时既不落溯源记录也不写 Redis 标记。知识库不可用的降级
             路径必须传 False —— 卡片其实没进知识库，若标记为「已采集」，
             等知识库恢复后这批卡片会被永久跳过
+        enrich: 可选的富化钩子（如补 README 原文快照），在去重与摘要之后调用，
+            因此只作用于真正入库的新卡；抛异常只记警告，不影响采集主流程
     """
     from src.modules.discovery.github_fetcher import summarize_items
 
@@ -511,6 +615,13 @@ async def collect_items(
 
     if summarize and new_items:
         new_items = await summarize_items(new_items, kind=kind)
+
+    # 富化放在去重与摘要之后：只为真正要入库的新卡付费，已采集卡片不重复抓
+    if enrich is not None and new_items:
+        try:
+            new_items = await enrich(new_items)
+        except Exception as e:  # noqa: BLE001 - 富化是锦上添花，不该让整批失败
+            logger.warning(f"[WARN] 卡片富化失败（不影响采集）: {e}")
 
     failed_count = 0
     for item in new_items:
@@ -578,6 +689,7 @@ __all__ = [
     "collect_items",
     "finish_batch",
     "get_collected_ids",
+    "get_or_fetch_card_content",
     "get_provenance",
     "get_redis_client",
     "is_collected",

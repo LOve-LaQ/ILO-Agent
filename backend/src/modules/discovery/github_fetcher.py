@@ -7,27 +7,63 @@
 """
 
 import asyncio
+import base64
 import json
 import re
 from datetime import datetime, timedelta, timezone
-from typing import List, Dict, Any
+from typing import Any, Dict, List, Optional
+from urllib.parse import urlparse
 
 import httpx
 
+from src.core.config import settings
+
 GITHUB_SEARCH_URL = "https://api.github.com/search/repositories"
+GITHUB_README_URL = "https://api.github.com/repos/{full_name}/readme"
+GITHUB_RAW_README_URL = "https://raw.githubusercontent.com/{full_name}/HEAD/{path}"
+
+# README 快照的字符上限：部分项目的 README 上万行，既拖慢渲染也撑大快照。
+# 截断后由前端给「查看完整原文」外链 —— 完整版永远能在 GitHub 上看到。
+MAX_README_CHARS = 60000
+
+# raw CDN 兜底时的候选文件名（按常见程度排序）
+README_FILENAMES = ("README.md", "readme.md", "README.rst", "README.txt", "README.MD")
+
+
+def _github_headers() -> Dict[str, str]:
+    """构造 GitHub 请求头。
+
+    配置了 GITHUB_TOKEN 时带上 Authorization：匿名调用只有 60 次/小时，
+    预取 README 会把这点额度迅速耗尽。该头只在此处产生，绝不写进日志或异常信息。
+    """
+    headers = {
+        "User-Agent": "ilo-agent-demo",
+        "Accept": "application/vnd.github+json",
+    }
+    token = (settings.github_token or "").strip()
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    return headers
+
+
+def repo_full_name(url: Optional[str]) -> Optional[str]:
+    """从 GitHub 仓库链接解析出 owner/repo，用于拼 README 接口路径"""
+    if not url:
+        return None
+    parsed = urlparse(url)
+    if (parsed.netloc or "").lower() not in {"github.com", "www.github.com"}:
+        return None
+    parts = [segment for segment in (parsed.path or "").split("/") if segment]
+    if len(parts) < 2:
+        return None
+    return f"{parts[0]}/{parts[1]}"
 
 
 class GitHubFetcher:
     """GitHub 热门仓库抓取器"""
 
     def __init__(self):
-        self.httpx_client = httpx.AsyncClient(
-            timeout=30,
-            headers={
-                "User-Agent": "ilo-agent-demo",
-                "Accept": "application/vnd.github+json",
-            },
-        )
+        self.httpx_client = httpx.AsyncClient(timeout=30, headers=_github_headers())
 
     async def fetch_trending_repos(self, limit: int = 50, since_days: int = 7) -> List[Dict[str, Any]]:
         """抓取近 N 天创建、按 star 排序的热门仓库（自动翻页，per_page 上限 100）"""
@@ -79,6 +115,131 @@ class GitHubFetcher:
 
     async def close(self):
         await self.httpx_client.aclose()
+
+
+def _truncate_readme(text: str) -> tuple:
+    """按字符上限截断 README，返回 (文本, 是否被截断)"""
+    if len(text) <= MAX_README_CHARS:
+        return text, False
+    return text[:MAX_README_CHARS], True
+
+
+async def _readme_via_api(full_name: str, client: httpx.AsyncClient) -> Optional[Dict[str, Any]]:
+    """官方 API：能拿到权威的 path 与 blob sha（溯源强度最高）"""
+    resp = await client.get(
+        GITHUB_README_URL.format(full_name=full_name), headers=_github_headers()
+    )
+    if resp.status_code != 200:
+        return None
+    data = resp.json()
+    encoded = data.get("content") or ""
+    if not encoded:
+        # 超过 1MB 的文件 API 不返回内联内容，交给 raw CDN 兜底
+        return None
+    content = base64.b64decode(encoded).decode("utf-8", errors="replace")
+    return {
+        "content": content,
+        "meta": {
+            "path": data.get("path"),
+            "sha": data.get("sha"),
+            "size": data.get("size"),
+            "source": "github-api",
+        },
+    }
+
+
+async def _readme_via_raw(full_name: str, client: httpx.AsyncClient) -> Optional[Dict[str, Any]]:
+    """raw CDN 兜底：不占 API 配额，但拿不到 sha（只知文件名）"""
+    for filename in README_FILENAMES:
+        url = GITHUB_RAW_README_URL.format(full_name=full_name, path=filename)
+        try:
+            resp = await client.get(url)
+        except Exception:  # noqa: BLE001 - 换下一个候选名继续试
+            continue
+        if resp.status_code != 200:
+            continue
+        content = resp.text
+        if not content.strip():
+            continue
+        return {
+            "content": content,
+            "meta": {
+                "path": filename,
+                "sha": None,
+                "size": len(resp.content),
+                "source": "raw-cdn",
+            },
+        }
+    return None
+
+
+async def fetch_readme(full_name: str, client: httpx.AsyncClient) -> Optional[Dict[str, Any]]:
+    """拉取仓库 README 快照，返回 {content, meta}；失败返回 None。
+
+    主路径走官方 API（带 token 时额度 5000/h），API 不可用（限流 / 5xx / 网络异常）
+    时降级到 raw CDN —— 「阅读原文」不该因为 token 失效而整体不可用。
+
+    只吞异常不抛：「先读原文」是锦上添花，绝不能连累卡片本身入库。
+    """
+    for strategy in (_readme_via_api, _readme_via_raw):
+        try:
+            result = await strategy(full_name, client)
+        except Exception as exc:  # noqa: BLE001 - 降级到下一个策略
+            print(f"[WARN] README 抓取失败({strategy.__name__}): {type(exc).__name__}")
+            continue
+        if not result:
+            continue
+        content, truncated = _truncate_readme(result["content"])
+        result["content"] = content
+        result["meta"]["truncated"] = truncated
+        result["meta"]["fetched_at"] = datetime.now(timezone.utc).isoformat()
+        return result
+    return None
+
+
+async def fetch_readme_standalone(full_name: str) -> Optional[Dict[str, Any]]:
+    """自建客户端的 README 抓取：按需补抓路径不需要持有 GitHubFetcher 实例"""
+    async with httpx.AsyncClient(timeout=30, headers=_github_headers()) as client:
+        return await fetch_readme(full_name, client)
+
+
+async def attach_readmes(items: List[Dict[str, Any]], concurrency: int = 4) -> List[Dict[str, Any]]:
+    """为仓库卡补 README 原文快照。
+
+    调用点在去重之后（collect_items 的 enrich 钩子），因此只为真正入库的新卡付费，
+    已采集过的卡片不会重复抓。
+
+    并发用信号量压住：GitHub 对突发请求有 secondary rate limit，一次并发几十个
+    请求会被判定为滥用并封禁一段时间。
+    """
+    targets = [
+        item
+        for item in items
+        if item.get("type", "repo") == "repo"
+        and repo_full_name(item.get("source_url") or item.get("link"))
+    ]
+    if not targets:
+        return items
+
+    semaphore = asyncio.Semaphore(max(1, concurrency))
+
+    async with httpx.AsyncClient(timeout=30, headers=_github_headers()) as client:
+
+        async def _enrich(item: Dict[str, Any]) -> None:
+            full_name = repo_full_name(item.get("source_url") or item.get("link"))
+            if not full_name:
+                return
+            async with semaphore:
+                result = await fetch_readme(full_name, client)
+            if not result:
+                return
+            # 私有字段：Qdrant payload 会显式排除（见 tech_knowledge），只进 PostgreSQL
+            item["raw_content"] = result["content"]
+            item["content_meta"] = result["meta"]
+
+        await asyncio.gather(*(_enrich(item) for item in targets), return_exceptions=True)
+
+    return items
 
 
 def _extract_json(text: str):

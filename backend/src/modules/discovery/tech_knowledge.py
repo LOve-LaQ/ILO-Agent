@@ -134,7 +134,13 @@ class TechKnowledgeBase:
             vector = [0.1] * VECTOR_SIZE  # 紧急降级
 
         point_id = int(hashlib.md5(str(item["id"]).encode()).hexdigest()[:16], 16)
-        payload = {k: v for k, v in item.items() if k != "vector"}
+        # README 原文是留给 PostgreSQL 的内容真相源，不是给向量库过滤用的元数据：
+        # 单条几十 KB，塞进 payload 会撑爆索引并拖慢 scroll，必须排除。
+        payload = {
+            k: v
+            for k, v in item.items()
+            if k not in {"vector", "raw_content", "content_meta"}
+        }
         self.qdrant.upsert(
             collection_name=COLLECTION,
             points=[PointStruct(id=point_id, vector=vector, payload=payload)],
