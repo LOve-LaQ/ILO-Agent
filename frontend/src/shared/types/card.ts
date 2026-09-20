@@ -23,5 +23,11 @@ export type CategoryCode = TechCard['category'];
 /** GET /discover/news 与 GET /discover/articles 的响应 */
 export type CardListResponse = components['schemas']['CardListResponse'];
 
+/** GET /discover/cards/{card_id}/content 的响应：原文（README）快照 */
+export type CardContentResponse = components['schemas']['CardContentResponse'];
+
+/** 原文快照的版本信息（path / sha / 截断标记等） */
+export type CardContentMeta = components['schemas']['CardContentMeta'];
+
 /** POST /discover/refresh 与 POST /discover/refresh-articles 的响应 */
 export type RefreshResponse = components['schemas']['RefreshResponse'];

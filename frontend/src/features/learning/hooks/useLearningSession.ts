@@ -3,6 +3,7 @@ import { useCallback, useRef } from 'react';
 
 import { useToastStore } from '../../../components/ui/toastStore';
 import { useAccessToken } from '../../../shared/api/authToken';
+import { fetchCardContent } from '../../../shared/api/cardContent';
 import { ApiError } from '../../../shared/api/client';
 import {
   fetchSessionDetail,
@@ -25,6 +26,8 @@ import { useLearningStore, type ChatMessage } from '../store';
  *   `chat_messages` / `learning_sessions`（`/learning/chat` 每轮都落库），
  *   刷新后从「我的 → 学习记录」回看即可；`restore()` 也改为读服务端而不是读浏览器，
  *   这样换设备、换浏览器都还在，也不再受浏览器清理数据的影响。
+ * - **先读后问**：`startLearning` 只打开原文阅读态，会话延后到用户点「直接提问」
+ *   才创建 —— 只读不提问不会在学习记录里留下一批零对话的空会话。
  */
 
 /** 服务端一条对话 → 前端气泡；时间戳取 created_at，保证回看顺序与落库一致 */
@@ -42,6 +45,7 @@ export function useLearningSession() {
   const state = useLearningStore((s) => s.state);
   const sessionId = useLearningStore((s) => s.sessionId);
   const card = useLearningStore((s) => s.card);
+  const content = useLearningStore((s) => s.content);
   const topic = useLearningStore((s) => s.topic);
   const explanation = useLearningStore((s) => s.explanation);
   const messages = useLearningStore((s) => s.messages);
@@ -55,46 +59,81 @@ export function useLearningSession() {
   /** 同一个登录态只尝试恢复一次，避免每次重渲染都去开抽屉 */
   const restoredFor = useRef<string | null>(null);
 
-  /** 打开抽屉并创建学习会话 */
-  const startLearning = useCallback(
-    async (item: TechCard) => {
-      const store = useLearningStore.getState();
-      store.setCard(item);
-      store.setTopic(item.title);
-      store.setOpen(true);
-      store.setState('loading');
-      store.setMessages([]);
-      store.setPending(false);
-      store.setQuestion('');
+  /**
+   * 打开抽屉并进入**原文阅读态**。
+   *
+   * 这里**不创建会话**：先让用户读原文，会话在「直接提问」时才真正建立，
+   * 这样「一次学习」的记录里都有实际对话，不会掺进零对话的空会话。
+   */
+  const startLearning = useCallback(async (item: TechCard) => {
+    const store = useLearningStore.getState();
+    store.setCard(item);
+    store.setTopic(item.title);
+    store.setOpen(true);
+    store.setState('reading');
+    store.setSessionId(null);
+    store.setContent(null);
+    store.setExplanation('');
+    store.setMessages([]);
+    store.setPending(false);
+    store.setQuestion('');
 
-      let createdSessionId: string | null = null;
-      try {
-        const data = await createLearningSession(item);
-        createdSessionId = data.session_id;
-      } catch (error) {
-        // 未登录：后端 /learning/* 一律 401，此刻客户端已把用户引导去登录页。
-        // 这种情况绝不能退回「本地卡片要点讲解」——那等于假装成功，误导用户。
-        if (error instanceof ApiError && error.status === 401) {
-          store.setOpen(false);
-          store.setState('idle');
-          store.setSessionId(null);
-          showToast('请先登录再开始学习');
-          return;
-        }
-        console.warn('创建学习会话失败，已回退为本地卡片要点讲解', error);
-        showToast('⚠️ 会话创建失败，已使用本地卡片要点讲解');
+    try {
+      const content = await fetchCardContent(item.id);
+      // 请求回来时用户可能已关掉抽屉或去读别的卡片了，别覆盖人家正在看的内容
+      if (useLearningStore.getState().card?.id !== item.id) return;
+      useLearningStore.getState().setContent(content);
+    } catch (error) {
+      // 原文拿不到不阻断流程：阅读页会降级展示卡片简介，「直接提问」依然可用
+      console.warn('读取原文失败:', error);
+    }
+  }, []);
+
+  /**
+   * 从原文页进入问答态 —— 会话在此刻才创建（「一次学习」= 真的开始问了）。
+   *
+   * 会话已存在时直接切态（例如用户看完「卡片要点」又回来点提问）。
+   */
+  const startChatting = useCallback(async () => {
+    const store = useLearningStore.getState();
+    if (store.sessionId) {
+      store.setState('chatting');
+      return;
+    }
+
+    const card = store.card;
+    if (!card) return;
+
+    store.setState('loading');
+    try {
+      const data = await createLearningSession(card);
+      store.setSessionId(data.session_id);
+      store.setState('chatting');
+    } catch (error) {
+      // 未登录：后端 /learning/* 一律 401，此刻客户端已把用户引导去登录页。
+      // 这种情况绝不能退回「本地卡片要点讲解」——那等于假装成功，误导用户。
+      if (error instanceof ApiError && error.status === 401) {
+        store.setOpen(false);
+        store.setState('idle');
+        store.setSessionId(null);
+        showToast('请先登录再开始学习');
+        return;
       }
-
-      store.setSessionId(createdSessionId);
-      store.setExplanation(buildExplanation(item));
+      // 其他失败退回卡片要点：至少不把用户丢在一个一直转圈的空白页上
+      console.warn('创建学习会话失败，已回退为本地卡片要点讲解', error);
+      showToast('⚠️ 会话创建失败，已使用本地卡片要点讲解');
+      store.setExplanation(buildExplanation(card));
       store.setState('explanation');
-    },
-    [showToast],
-  );
+    }
+  }, [showToast]);
 
-  /** 从讲解态进入问答态 */
-  const startChatting = useCallback(() => {
-    useLearningStore.getState().setState('chatting');
+  /** 原文页 → 卡片要点（本地模板，零成本；提问阶段才走 DeepSeek） */
+  const showCardPoints = useCallback(() => {
+    const store = useLearningStore.getState();
+    const card = store.card;
+    if (!card) return;
+    store.setExplanation(buildExplanation(card));
+    store.setState('explanation');
   }, []);
 
   const send = useCallback(async () => {
@@ -187,6 +226,7 @@ export function useLearningSession() {
     state,
     sessionId,
     card,
+    content,
     topic,
     explanation,
     messages,
@@ -195,6 +235,7 @@ export function useLearningSession() {
     setQuestion,
     startLearning,
     startChatting,
+    showCardPoints,
     send,
     close,
     restore,

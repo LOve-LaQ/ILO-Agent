@@ -4,6 +4,13 @@ import remarkGfm from 'remark-gfm';
 
 interface MarkdownBodyProps {
   content: string;
+  /**
+   * 是否渲染远程图片。
+   *
+   * 阅读仓库 README 时必须关掉：外部图片会带第三方请求（追踪像素）并拖慢渲染，
+   * 而这段内容完全不受我们控制。对话气泡等自有内容保持默认开启。
+   */
+  allowImages?: boolean;
 }
 
 /**
@@ -15,6 +22,13 @@ interface MarkdownBodyProps {
  * 渲染同一批模型输出（同一份 `chat_messages`），两处必须长成一样；放在某个 feature 里
  * 就会被另一个 feature 反向依赖。
  */
-export function MarkdownBody({ content }: MarkdownBodyProps) {
-  return <ReactMarkdown remarkPlugins={[remarkGfm, remarkBreaks]}>{content}</ReactMarkdown>;
+export function MarkdownBody({ content, allowImages = true }: MarkdownBodyProps) {
+  return (
+    <ReactMarkdown
+      remarkPlugins={[remarkGfm, remarkBreaks]}
+      components={allowImages ? undefined : { img: () => null }}
+    >
+      {content}
+    </ReactMarkdown>
+  );
 }

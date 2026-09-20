@@ -136,6 +136,84 @@
   opacity: 0.5;
 }
 
+/* ===== 原文阅读态（先读后问） ===== */
+.reading {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+/* 来源标注：让用户一眼看出读的是原文快照，而不是 AI 转述 */
+.sourceBar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 7px;
+  padding: 9px 18px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+  font-size: 11.5px;
+  color: var(--text-3);
+}
+
+.sourceBar code {
+  font-size: 11px;
+  padding: 1px 6px;
+  border-radius: 6px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+}
+
+.sourceBar a {
+  margin-left: auto;
+  color: var(--brand);
+  font-weight: 500;
+}
+
+.sourceWarn {
+  color: var(--danger);
+}
+
+.readBody {
+  flex: 1;
+  overflow-y: auto;
+  padding: 18px;
+  background: var(--bg);
+  font-size: 13.5px;
+  line-height: 1.7;
+  /* README 里常有超长行（长 URL / 宽表格），不换行会把抽屉撑出横向滚动 */
+  overflow-wrap: anywhere;
+}
+
+.readPlaceholder {
+  color: var(--text-3);
+}
+
+.readNote {
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px dashed var(--border);
+  font-size: 12px;
+  color: var(--text-3);
+}
+
+.readNote a {
+  color: var(--brand);
+}
+
+.readActions {
+  display: flex;
+  gap: 10px;
+  padding: 12px 18px;
+  border-top: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.readActions > * {
+  flex: 1;
+}
+
 @media (max-width: 860px) {
   .drawer {
     width: 100%;

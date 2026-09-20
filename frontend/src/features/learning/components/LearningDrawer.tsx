@@ -1,13 +1,15 @@
 import clsx from 'clsx';
 import { useEffect, useRef } from 'react';
 
+import { MarkdownBody } from '../../../components/ui/MarkdownBody';
 import { useLearningSession } from '../hooks/useLearningSession';
 import { ChatBubble, TypingBubble } from './ChatBubble';
 import styles from './LearningDrawer.module.css';
 
 /**
- * 学习会话抽屉：三态 loading / explanation / chatting。
- * 对应原 index.html 的 .drawer 区块。
+ * 学习会话抽屉：四态 reading（先读原文）/ loading（建会话）/ explanation（卡片要点）
+ * / chatting（问答）。
+ * 对应原 index.html 的 .drawer 区块，并新增「原文优先」的阅读态。
  */
 export function LearningDrawer() {
   const {
@@ -15,6 +17,7 @@ export function LearningDrawer() {
     state,
     sessionId,
     card,
+    content,
     topic,
     explanation,
     messages,
@@ -22,6 +25,7 @@ export function LearningDrawer() {
     question,
     setQuestion,
     startChatting,
+    showCardPoints,
     send,
     close,
     restore,
@@ -57,6 +61,8 @@ export function LearningDrawer() {
 
   // 从服务端恢复的会话没有卡片对象，退回用会话主题；两者都没有才用兜底文案
   const title = card?.title || topic || '深度讲解';
+  // 原文来源：优先用快照记录的 source_url，其次退回卡片自身的 link
+  const sourceUrl = content?.source_url || card?.link || '';
   const canSend = !pending && question.trim().length > 0;
 
   return (
@@ -68,7 +74,13 @@ export function LearningDrawer() {
           <div style={{ minWidth: 0 }}>
             <div className={styles.title}>{title}</div>
             <div className={styles.sub}>
-              会话 <span>{sessionId || '…'}</span> · DeepSeek 驱动
+              {state === 'reading' ? (
+                '原文快照 · 先读一读，有疑问再提问'
+              ) : (
+                <>
+                  会话 <span>{sessionId || '…'}</span> · DeepSeek 驱动
+                </>
+              )}
             </div>
           </div>
           <button className={clsx('tiny-btn', styles.close)} type="button" onClick={close}>
@@ -79,7 +91,76 @@ export function LearningDrawer() {
         {state === 'loading' && (
           <div className={styles.chatLoading}>
             <div className="spin" />
-            <p>正在准备讲解内容…</p>
+            <p>正在创建学习会话…</p>
+          </div>
+        )}
+
+        {state === 'reading' && (
+          <div className={styles.reading}>
+            {content ? (
+              <div className={styles.sourceBar}>
+                {content.origin === 'unavailable' ? (
+                  <span className={styles.sourceWarn}>
+                    未取到原文快照，展示采集时的原始简介
+                  </span>
+                ) : (
+                  <>
+                    <span>原文快照</span>
+                    {content.meta?.path ? <code>{content.meta.path}</code> : null}
+                    {content.meta?.sha ? <code>{content.meta.sha.slice(0, 7)}</code> : null}
+                    {content.meta?.fetched_at ? (
+                      <span>{content.meta.fetched_at.slice(0, 10)}</span>
+                    ) : null}
+                  </>
+                )}
+                {sourceUrl ? (
+                  <a href={sourceUrl} target="_blank" rel="noopener noreferrer">
+                    打开仓库 ↗
+                  </a>
+                ) : null}
+              </div>
+            ) : null}
+
+            <div className={styles.readBody}>
+              {!content ? (
+                <p className={styles.readPlaceholder}>正在获取原文…</p>
+              ) : content.content ? (
+                <>
+                  {/* 原文来自外部仓库且不受我们控制，故不允许加载远程图片 */}
+                  <MarkdownBody content={content.content} allowImages={false} />
+                  {content.truncated ? (
+                    <p className={styles.readNote}>
+                      原文过长，已截断展示。
+                      {sourceUrl ? (
+                        <>
+                          {' '}
+                          <a href={sourceUrl} target="_blank" rel="noopener noreferrer">
+                            查看完整版本 ↗
+                          </a>
+                        </>
+                      ) : null}
+                    </p>
+                  ) : null}
+                </>
+              ) : (
+                <p className={styles.readPlaceholder}>
+                  {content.fallback_description || '这个仓库暂时取不到可展示的原文。'}
+                </p>
+              )}
+            </div>
+
+            <div className={styles.readActions}>
+              <button className="btn" type="button" onClick={showCardPoints}>
+                📌 卡片要点
+              </button>
+              <button
+                className={clsx('btn', 'btn-primary')}
+                type="button"
+                onClick={() => void startChatting()}
+              >
+                💬 直接提问
+              </button>
+            </div>
           </div>
         )}
 

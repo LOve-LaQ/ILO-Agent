@@ -171,6 +171,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/discover/cards/{card_id}/content": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Card Content
+         * @description 读一张卡片的原文（仓库 README）快照，「先读原文」页的数据来源
+         *
+         *     - 匿名可读：README 本身就是公开内容，读原文不该被登录墙拦住（提问才需要登录）
+         *     - 本地没有快照（存量卡片）时按需补抓一次并回写，之后零延迟
+         *     - 抓不到时返回 `origin=unavailable` 并带上 fallback_description，由前端优雅降级
+         */
+        get: operations["get_card_content_api_v1_discover_cards__card_id__content_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/auth/register": {
         parameters: {
             query?: never;
@@ -1042,6 +1066,82 @@ export interface components {
              * @description VAPTCHA 验证单元 id（公开）
              */
             vid?: string | null;
+        };
+        /**
+         * CardContentMeta
+         * @description 原文快照的版本信息（回答「读的是哪个版本」）
+         */
+        CardContentMeta: {
+            /**
+             * Path
+             * @description README 文件名，如 README.md
+             */
+            path?: string | null;
+            /**
+             * Sha
+             * @description git blob sha；raw CDN 兜底路径拿不到时为 null
+             */
+            sha?: string | null;
+            /**
+             * Size
+             * @description 原始字节数（截断前）
+             */
+            size?: number | null;
+            /**
+             * Source
+             * @description github-api | raw-cdn
+             */
+            source?: string | null;
+            /**
+             * Truncated
+             * @description 是否因超出字符上限而截断
+             * @default false
+             */
+            truncated: boolean;
+            /**
+             * Fetched At
+             * @description 获取时间（ISO 8601）
+             */
+            fetched_at?: string | null;
+        };
+        /**
+         * CardContentResponse
+         * @description GET /discover/cards/{card_id}/content 响应（匿名可读）
+         *
+         *     `origin` 决定前端展示方式：
+         *     - snapshot：本地已有快照，直接渲染 content
+         *     - on_demand：本次实时补抓并已回写，后续请求会变成 snapshot
+         *     - unavailable：抓不到原文（非 GitHub 仓库 / 无 README / 网络失败），退回 fallback_description
+         */
+        CardContentResponse: {
+            /** Card Id */
+            card_id: string;
+            /** Source Url */
+            source_url?: string | null;
+            /** Source Platform */
+            source_platform?: string | null;
+            /**
+             * Content
+             * @description 仓库 README 原文（Markdown），超出上限会被截断
+             */
+            content?: string | null;
+            /**
+             * Truncated
+             * @default false
+             */
+            truncated: boolean;
+            meta?: components["schemas"]["CardContentMeta"] | null;
+            /**
+             * Fallback Description
+             * @description 抓不到原文时的兜底展示：采集时的原始简介
+             */
+            fallback_description?: string | null;
+            /**
+             * Origin
+             * @default unavailable
+             * @enum {string}
+             */
+            origin: "snapshot" | "on_demand" | "unavailable";
         };
         /**
          * CardListResponse
@@ -2707,6 +2807,109 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ProvenanceResponse"];
+                };
+            };
+            /** @description 业务错误（{code, message, detail}） */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 未登录 / 凭证无效或已过期 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 已登录但无权访问 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 状态冲突 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 请求过于频繁（限流，响应头带 Retry-After） */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 服务内部错误 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 上游依赖失败 */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_card_content_api_v1_discover_cards__card_id__content_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                card_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CardContentResponse"];
                 };
             };
             /** @description 业务错误（{code, message, detail}） */

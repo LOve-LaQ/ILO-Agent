@@ -1,9 +1,9 @@
 import { create } from 'zustand';
 
 import { onSessionReset } from '../../shared/lib/sessionBus';
-import type { TechCard } from '../../shared/types/card';
+import type { CardContentResponse, TechCard } from '../../shared/types/card';
 
-export type LearningState = 'idle' | 'loading' | 'explanation' | 'chatting';
+export type LearningState = 'idle' | 'loading' | 'reading' | 'explanation' | 'chatting';
 
 export interface ChatMessage {
   role: 'user' | 'assistant';
@@ -16,10 +16,15 @@ export interface ChatMessage {
 interface LearningStoreState {
   /** 抽屉是否可见 */
   open: boolean;
-  /** 三态：loading（准备讲解）/ explanation（讲解文本）/ chatting（问答） */
+  /**
+   * 五态：reading（先读原文）/ loading（创建会话中）/ explanation（卡片要点）
+   * / chatting（问答）/ idle（关闭）
+   */
   state: LearningState;
   sessionId: string | null;
   card: TechCard | null;
+  /** 原文快照（reading 态展示）；会话创建被延后，所以它早于 sessionId 存在 */
+  content: CardContentResponse | null;
   /**
    * 会话主题。
    *
@@ -38,6 +43,7 @@ interface LearningStoreState {
   setState: (state: LearningState) => void;
   setSessionId: (sessionId: string | null) => void;
   setCard: (card: TechCard | null) => void;
+  setContent: (content: CardContentResponse | null) => void;
   setTopic: (topic: string) => void;
   setExplanation: (explanation: string) => void;
   setMessages: (messages: ChatMessage[]) => void;
@@ -52,6 +58,7 @@ const INITIAL_STATE = {
   state: 'idle' as LearningState,
   sessionId: null,
   card: null,
+  content: null,
   topic: '',
   explanation: '',
   messages: [] as ChatMessage[],
@@ -67,6 +74,7 @@ export const useLearningStore = create<LearningStoreState>((set) => ({
   setState: (state) => set({ state }),
   setSessionId: (sessionId) => set({ sessionId }),
   setCard: (card) => set({ card }),
+  setContent: (content) => set({ content }),
   setTopic: (topic) => set({ topic }),
   setExplanation: (explanation) => set({ explanation }),
   setMessages: (messages) => set({ messages }),
