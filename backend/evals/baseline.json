@@ -1,0 +1,26 @@
+{
+  "summary": {
+    "overall": 4.783,
+    "dimension_means": {
+      "chinese": 5.0,
+      "informativeness": 4.5,
+      "faithfulness": 4.417,
+      "format": 5.0,
+      "style": 5.0
+    },
+    "scored": 12,
+    "updated_at": "2026-09-22T15:37:27.363657+00:00"
+  },
+  "digest": {
+    "overall": 4.533,
+    "dimension_means": {
+      "chinese": 5.0,
+      "informativeness": 4.333,
+      "faithfulness": 3.667,
+      "format": 4.778,
+      "style": 4.889
+    },
+    "scored": 9,
+    "updated_at": "2026-09-22T15:37:27.363677+00:00"
+  }
+}

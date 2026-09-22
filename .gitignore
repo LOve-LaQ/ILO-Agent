@@ -41,6 +41,8 @@ htmlcov/
 .pytest_cache/
 /backend/quick_test.py
 /backend/test_*.py
+# Eval 逐次报告产物（datasets/ 与 baseline.json 入库，reports/ 不入库）
+/backend/evals/reports/
 
 # Database
 *.db

@@ -1,0 +1,81 @@
+[
+  {
+    "id": "d01",
+    "title": "pgvector",
+    "raw_description": "Open-source vector similarity search for Postgres",
+    "readme_excerpt": "# pgvector\n\nOpen-source vector similarity search for Postgres.\n\nSupports exact and approximate nearest neighbor search, L2 distance, inner product and cosine distance, and works with any language that has a Postgres client.\n\nExample:\n\n    CREATE EXTENSION vector;\n    CREATE TABLE items (id bigserial PRIMARY KEY, embedding vector(3));\n    INSERT INTO items (embedding) VALUES ('[1,2,3]'), ('[4,5,6]');\n    SELECT * FROM items ORDER BY embedding <-> '[3,1,2]' LIMIT 5;\n\nIndexing is supported through HNSW and IVFFlat."
+  },
+  {
+    "id": "d02",
+    "title": "headscale",
+    "raw_description": "An open source, self-hosted implementation of the Tailscale control server",
+    "readme_excerpt": "# headscale\n\nAn open source, self-hosted implementation of the Tailscale control server.\n\nHeadscale aims to implement a self-hosted, open source alternative to the Tailscale control server. It works with the official Tailscale clients and lets you manage your own mesh network.\n\nFeatures:\n\n- Support for Tailscale clients on Windows, macOS, Linux, Android and iOS\n- ACL support\n- Namespaces (users)\n- Easy to deploy via Docker or a single binary"
+  },
+  {
+    "id": "d03",
+    "title": "shellcheck-action",
+    "raw_description": "GitHub Action for ShellCheck.",
+    "readme_excerpt": "",
+    "label": ""
+  },
+  {
+    "id": "d04",
+    "title": "ollama",
+    "raw_description": "Get up and running with OpenAI gpt-oss, DeepSeek-R1, Gemma 3 and other models.",
+    "readme_excerpt": "# Ollama\n\nGet up and running with large language models locally.\n\n## Quickstart\n\nInstall Ollama, then run a model:\n\n    ollama run llama3\n\nOllama bundles model weights, configuration, and data into a single package, and exposes a simple REST API on localhost:11434 for chatting and generating embeddings."
+  },
+  {
+    "id": "d05",
+    "title": "redis",
+    "raw_description": "Redis is an in-memory database that persists on disk.",
+    "readme_excerpt": "# Redis\n\nRedis is an open source, in-memory data store used as a database, cache, streaming engine, and message broker. It supports data structures such as strings, hashes, lists, sets, sorted sets and streams, and provides persistence with RDB snapshots and AOF logs. Redis also offers replication, Lua scripting, transactions, pub/sub, and high availability with Redis Sentinel and Redis Cluster."
+  },
+  {
+    "id": "d06",
+    "title": "duckdb",
+    "raw_description": "DuckDB is an in-process SQL OLAP database management system",
+    "readme_excerpt": "# DuckDB\n\nDuckDB is an in-process SQL OLAP database management system. It is designed to be fast, reliable, portable and easy to use, with zero external dependencies. DuckDB can read and write Parquet, CSV and JSON files directly, and integrates with Python, R, Java and Node.js."
+  },
+  {
+    "id": "d07",
+    "title": "tauri",
+    "raw_description": "Build smaller, faster, and more secure desktop applications with a web frontend",
+    "readme_excerpt": "# Tauri\n\nTauri is a framework for building tiny, fast binaries for all major desktop platforms. It uses a Rust core with a web frontend, so developers can use any frontend framework. The resulting apps are small, use the system webview, and support secure IPC and a pluggable permission system."
+  },
+  {
+    "id": "d08",
+    "title": "deno",
+    "raw_description": "A modern runtime for JavaScript and TypeScript",
+    "readme_excerpt": "# Deno\n\nDeno is a simple, modern and secure runtime for JavaScript and TypeScript that uses V8 and is built in Rust. It has secure defaults, supports TypeScript out of the box, ships a built-in test runner, and provides a standard library. Deno also includes a formatter, a linter and the deno task runner."
+  },
+  {
+    "id": "d09",
+    "title": "uv",
+    "raw_description": "An extremely fast Python package and project manager, written in Rust.",
+    "readme_excerpt": "# uv\n\nuv is an extremely fast Python package and project manager, written in Rust. It can replace pip, pip-tools, pipx, poetry, pyenv and virtualenv. uv installs packages and manages virtual environments, resolves dependencies, and can manage Python versions, all in a single tool."
+  },
+  {
+    "id": "d10",
+    "label": "英文照抄",
+    "title": "pgvector",
+    "raw_description": "Open-source vector similarity search for Postgres",
+    "readme_excerpt": "# pgvector\n\nOpen-source vector similarity search for Postgres. Supports exact and approximate nearest neighbor search, L2 distance, inner product and cosine distance.",
+    "output": "pgvector is an open-source vector similarity search extension for Postgres. It supports exact and approximate nearest neighbor search, L2 distance, inner product and cosine distance. You can index your vectors using HNSW or IVFFlat to speed up queries."
+  },
+  {
+    "id": "d11",
+    "label": "编造性能数字",
+    "title": "headscale",
+    "raw_description": "An open source, self-hosted implementation of the Tailscale control server",
+    "readme_excerpt": "# headscale\n\nAn open source, self-hosted implementation of the Tailscale control server. It works with the official Tailscale clients and supports ACLs, namespaces, and Docker deployment.",
+    "output": "headscale 是一个可自托管的 Tailscale 控制服务器实现，配合官方客户端即可搭建自己的网状网络。它支持 ACL 与命名空间，并提供 Docker 部署方式。在实测中，它可以在单节点上稳定支撑十万台设备接入，并把组网延迟降低到毫秒以内，相比官方方案节省 90% 的成本。"
+  },
+  {
+    "id": "d12",
+    "label": "未分节且过短",
+    "title": "ollama",
+    "raw_description": "Get up and running with OpenAI gpt-oss, DeepSeek-R1, Gemma 3 and other models.",
+    "readme_excerpt": "# Ollama\n\nGet up and running with large language models locally. Install Ollama, then run a model. Ollama exposes a REST API on localhost:11434.",
+    "output": "Ollama 是一个可以在本地运行大模型的工具，安装后就能跑起来，还提供了 API。"
+  }
+]

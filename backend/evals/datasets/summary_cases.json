@@ -1,0 +1,194 @@
+[
+  {
+    "id": "s01",
+    "kind": "repo",
+    "input": {
+      "title": "AirCard",
+      "description": "Apple Wallet Card Skinner for iOS 18+ (No Jailbreak Required)",
+      "language": "Swift",
+      "core_concepts": ["iOS", "Apple Wallet"]
+    }
+  },
+  {
+    "id": "s02",
+    "kind": "repo",
+    "input": {
+      "title": "llama.cpp",
+      "description": "LLM inference in C/C++",
+      "language": "C++",
+      "core_concepts": ["LLM", "inference", "quantization"]
+    }
+  },
+  {
+    "id": "s03",
+    "kind": "repo",
+    "input": {
+      "title": "qdrant",
+      "description": "Qdrant - High-performance, massive-scale Vector Database for the next generation of AI.",
+      "language": "Rust",
+      "core_concepts": ["vector database", "similarity search"]
+    }
+  },
+  {
+    "id": "s04",
+    "kind": "repo",
+    "input": {
+      "title": "dify",
+      "description": "Production-ready platform for agentic workflow development.",
+      "language": "TypeScript",
+      "core_concepts": ["LLM app", "workflow", "agent"]
+    }
+  },
+  {
+    "id": "s05",
+    "kind": "repo",
+    "input": {
+      "title": "rustdesk",
+      "description": "An open-source remote desktop application designed for self-hosting, as an alternative to TeamViewer.",
+      "language": "Rust",
+      "core_concepts": ["remote desktop", "self-hosted"]
+    }
+  },
+  {
+    "id": "s06",
+    "kind": "repo",
+    "input": {
+      "title": "kratos",
+      "description": "Kratos 是哔哩哔哩开源的 Go 微服务框架，内置 HTTP/gRPC 与治理能力",
+      "language": "Go",
+      "core_concepts": ["微服务", "gRPC"]
+    }
+  },
+  {
+    "id": "s07",
+    "kind": "repo",
+    "input": {
+      "title": "shellcheck-action",
+      "description": "GitHub Action for ShellCheck.",
+      "language": "Shell",
+      "core_concepts": []
+    }
+  },
+  {
+    "id": "s08",
+    "kind": "repo",
+    "input": {
+      "title": "pgvector",
+      "description": "Open-source vector similarity search for Postgres",
+      "language": "C",
+      "core_concepts": ["PostgreSQL", "vector search"]
+    }
+  },
+  {
+    "id": "s09",
+    "kind": "article",
+    "input": {
+      "title": "Understanding RAG",
+      "description": "A deep dive into retrieval augmented generation: chunking, embeddings, and reranking.",
+      "language": "English",
+      "core_concepts": ["RAG", "embeddings", "reranking"]
+    }
+  },
+  {
+    "id": "s10",
+    "kind": "article",
+    "input": {
+      "title": "为什么你的微服务需要一个 API 网关",
+      "description": "从限流、鉴权、可观测性三个角度讲清楚网关的价值。",
+      "language": "Chinese",
+      "core_concepts": ["微服务", "API 网关"]
+    }
+  },
+  {
+    "id": "s11",
+    "kind": "repo",
+    "input": {
+      "title": "headscale",
+      "description": "An open source, self-hosted implementation of the Tailscale control server",
+      "language": "Go",
+      "core_concepts": ["mesh VPN", "WireGuard"]
+    }
+  },
+  {
+    "id": "s12",
+    "kind": "repo",
+    "input": {
+      "title": "ollama",
+      "description": "Get up and running with OpenAI gpt-oss, DeepSeek-R1, Gemma 3 and other models.",
+      "language": "Go",
+      "core_concepts": ["local LLM", "model runner"]
+    }
+  },
+  {
+    "id": "s13",
+    "label": "英文照抄",
+    "kind": "repo",
+    "input": {
+      "title": "AirCard",
+      "description": "Apple Wallet Card Skinner for iOS 18+ (No Jailbreak Required)",
+      "language": "Swift",
+      "core_concepts": ["iOS"]
+    },
+    "output": "Apple Wallet Card Skinner for iOS 18+ (No Jailbreak Required)"
+  },
+  {
+    "id": "s14",
+    "label": "空洞开头",
+    "kind": "repo",
+    "input": {
+      "title": "some-tool",
+      "description": "A CLI tool for batch image compression.",
+      "language": "Python",
+      "core_concepts": []
+    },
+    "output": "这是一个非常棒的仓库，作者做了很多工作，值得一看，可以提升你的开发效率。"
+  },
+  {
+    "id": "s15",
+    "label": "超长单句无收尾",
+    "kind": "repo",
+    "input": {
+      "title": "pipeline-kit",
+      "description": "A modular data pipeline toolkit with pluggable stages.",
+      "language": "Python",
+      "core_concepts": []
+    },
+    "output": "这个项目通过一套高度模块化的插件体系把数据采集清洗向量化检索以及结果重排序等多个环节串联起来并在此基础上提供了一套完整的可视化界面让开发者能够快速定位问题同时它还内置了多种缓存策略和限流机制以保证在高并发场景下的稳定性与响应速度"
+  },
+  {
+    "id": "s16",
+    "label": "截断省略",
+    "kind": "repo",
+    "input": {
+      "title": "vector-serve",
+      "description": "A small vector search service.",
+      "language": "Go",
+      "core_concepts": []
+    },
+    "output": "这款工具可以帮助你快速搭建向量检索服务，支持多种索引类型，并且能够与 Postgre..."
+  },
+  {
+    "id": "s17",
+    "label": "编造性能数字",
+    "kind": "repo",
+    "input": {
+      "title": "shellcheck-action",
+      "description": "GitHub Action for ShellCheck.",
+      "language": "Shell",
+      "core_concepts": []
+    },
+    "output": "ShellCheck 的 GitHub Action 封装，可在 CI 中自动检查 Shell 脚本，实测每秒可扫描百万行脚本并降低 80% 的线上故障率。"
+  },
+  {
+    "id": "s18",
+    "label": "中英混杂成句英文",
+    "kind": "repo",
+    "input": {
+      "title": "AirCard",
+      "description": "Apple Wallet Card Skinner for iOS 18+ (No Jailbreak Required)",
+      "language": "Swift",
+      "core_concepts": ["iOS"]
+    },
+    "output": "AirCard 是一个 iOS 工具。It provides a card skin feature without jailbreak."
+  }
+]
