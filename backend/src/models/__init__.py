@@ -5,6 +5,7 @@ from src.models.base import Base, utcnow
 from src.models.collection import CollectionBatch, CollectionRecord
 from src.models.consent import ConsentRecord
 from src.models.engagement import UserActivity, UserBookmark
+from src.models.interest import UserInterestProfile
 from src.models.learning import ChatMessage, LearningSession
 from src.models.notification import EmailOutbox
 from src.models.password_reset import PasswordResetToken
@@ -23,6 +24,8 @@ __all__ = [
     "ChatMessage",
     "UserBookmark",
     "UserActivity",
+    # 个性化推送
+    "UserInterestProfile",
     # 会话与账号生命周期（阶段 5）
     "UserSession",
     "PasswordResetToken",
