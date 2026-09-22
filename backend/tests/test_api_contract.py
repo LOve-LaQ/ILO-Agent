@@ -411,3 +411,41 @@ def test_provenance_is_readable_anonymously(anonymous_client):
     body = response.json()
     assert body["known"] is False
     assert body["card"] is not None
+
+
+# ---------------------------------------------------------------- 个性化推荐字段
+
+
+def test_news_declares_recommend_fields_in_contract(openapi):
+    """推荐字段必须进契约（且为可选），前端才能派生类型"""
+    properties = openapi["components"]["schemas"]["TechCard"]["properties"]
+    assert "recommend_score" in properties
+    assert "recommend_reason" in properties
+
+
+def test_news_recommend_fields_are_null_without_profile(client):
+    """登录但拿不到画像（新用户 / 无行为 / 库不可用）→ 字段存在且为 null
+
+    字段必须始终存在：前端只需一套渲染逻辑，「本次不是个性化」用 null 表达，
+    而不是靠缺字段。
+    """
+    response = client.get("/api/v1/discover/news", params={"limit": 2})
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["source"] in {"knowledge_base", "github", "sample"}
+
+    for card in body["items"]:
+        assert "recommend_score" in card
+        assert "recommend_reason" in card
+        assert card["recommend_score"] is None
+        assert card["recommend_reason"] is None
+
+
+def test_news_recommend_fields_are_null_for_anonymous(anonymous_client):
+    """未登录不看画像，但也必须照常返回卡片（个性化不能变成登录墙）"""
+    response = anonymous_client.get("/api/v1/discover/news", params={"limit": 1})
+    assert response.status_code == 200, response.text
+
+    for card in response.json()["items"]:
+        assert card["recommend_score"] is None
+        assert card["recommend_reason"] is None

@@ -42,6 +42,8 @@ _RULES: dict[str, tuple[str, int]] = {
     "discover:refresh:ip": ("discover_refresh_rate_limit_per_hour", 3600),
     "discover:content:ip": ("card_content_rate_limit_per_hour", 3600),
     "discover:digest:ip": ("card_digest_rate_limit_per_hour", 3600),
+    # 首屏资讯：登录用户会做一次全量候选排序（扫全库向量），不给额度就能被脚本刷
+    "discover:news:ip": ("news_rate_limit_per_hour", 3600),
     "password:reset:ip": ("password_reset_rate_limit_per_hour", 3600),
     "learning:chat:ip": ("learning_chat_rate_limit_per_hour", 3600),
     "account:cancel:ip": ("account_cancel_rate_limit_per_hour", 3600),
@@ -146,6 +148,7 @@ EMAIL_RESEND_IP = RateLimitRule("email:resend")
 DISCOVER_REFRESH_IP = RateLimitRule("discover:refresh:ip")
 CARD_CONTENT_IP = RateLimitRule("discover:content:ip")
 CARD_DIGEST_IP = RateLimitRule("discover:digest:ip")
+NEWS_IP = RateLimitRule("discover:news:ip")
 PASSWORD_RESET_IP = RateLimitRule("password:reset:ip")
 LEARNING_CHAT_IP = RateLimitRule("learning:chat:ip")
 ACCOUNT_CANCEL_IP = RateLimitRule("account:cancel:ip")
@@ -163,6 +166,7 @@ __all__ = [
     "LEARNING_CHAT_IP",
     "LOGIN_ACCOUNT",
     "LOGIN_IP",
+    "NEWS_IP",
     "PASSWORD_RESET_IP",
     "REGISTER_IP",
     "REFRESH_IP",

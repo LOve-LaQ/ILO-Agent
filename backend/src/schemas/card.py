@@ -83,6 +83,15 @@ class TechCard(BaseModel):
     batch_id: Optional[str] = None
     raw_description: Optional[str] = None
 
+    # 个性化推送字段：仅 /discover/news 在「登录且有可用画像」时注入；
+    # 匿名、新用户、回退随机时一律为 None —— 可选字段，既有卡片不受影响。
+    recommend_score: Optional[float] = Field(
+        None, ge=0, le=1, description="兴趣推荐分（0~1，越接近 1 越贴近画像）"
+    )
+    recommend_reason: Optional[str] = Field(
+        None, description="推荐理由（一句话中文；非个性化时为 null）"
+    )
+
     @model_validator(mode="before")
     @classmethod
     def _normalize_legacy(cls, data: Any) -> Any:

@@ -14,12 +14,20 @@ from fastapi import APIRouter, Depends, Query, Request
 from typing import List, Dict, Any, Optional
 import json
 import os
+import random
 import redis as redis_lib
 from loguru import logger
 
 from src.api.deps import CurrentUser, OptionalUser
+from src.core.config import settings
 from src.core.errors import ERROR_RESPONSES, ILOException
-from src.core.rate_limit import CARD_CONTENT_IP, CARD_DIGEST_IP, DISCOVER_REFRESH_IP, rate_limit
+from src.core.rate_limit import (
+    CARD_CONTENT_IP,
+    CARD_DIGEST_IP,
+    DISCOVER_REFRESH_IP,
+    NEWS_IP,
+    rate_limit,
+)
 from src.schemas.discover import (
     CardContentResponse,
     CardDigestResponse,
@@ -140,26 +148,72 @@ FALLBACK_ARTICLES = [
 ]
 
 
-@router.get("/news", response_model=CardListResponse)
+# 个性化排序的候选池倍数：池子要比首屏条数大得多，「换一批」才有腾挪空间；
+# 太小等于每次返回同一批，太大则会推出一堆低相关卡片（池子里越低分越靠后）。
+_POOL_FACTOR = 4
+_POOL_MIN = 12
+
+
+def _personalized_items(kb, user, limit: int) -> List[Dict[str, Any]]:
+    """登录且画像可用时按兴趣相似度取一批卡片；否则返回 []（调用方回退随机）
+
+    为什么要「随机窗口」而不是直接取 top-k：前端「换一批」是同一个 URL（不带 offset）
+    重复请求，若每次都返回确定性 top-k，按钮就变成了假动作（内容不变只弹 toast）。
+    这里先按相似度取出一个较大的池子（已做类别打散），再从池子里随机截一段，
+    既保持「只在相关卡片里选」，又让每次刷新真的不同。
+    """
+    if user is None or not settings.interest_profile_enabled:
+        return []
+
+    try:
+        from src.services.interest_profile import build_user_profile
+        from src.services.recommend import diversify_by_category, rank_candidates
+
+        profile = build_user_profile(user.id)
+        if profile is None:
+            return []  # 新用户 / 无行为 / 知识库不可用：交给随机兜底
+
+        pool_size = max(limit * _POOL_FACTOR, _POOL_MIN)
+        pool = rank_candidates(kb.candidate_points(item_type="repo"), profile, pool_size)
+        if len(pool) <= limit:
+            return pool
+
+        start = random.randint(0, len(pool) - limit)
+        return diversify_by_category(pool[start:start + limit])
+    except Exception as e:  # noqa: BLE001 - 个性化失败必须不影响首屏可用
+        logger.warning(f"[WARN] 个性化排序失败，回退随机: {e}")
+        return []
+
+
+@router.get(
+    "/news",
+    response_model=CardListResponse,
+    dependencies=[Depends(rate_limit(NEWS_IP))],
+)
 async def get_recommended_news(
+    user: OptionalUser,
     limit: int = 3,
     offset: int = 0
 ) -> Dict[str, Any]:
     """
-    获取推荐资讯列表（优先从知识库随机抽取，实现「换一批」秒回）
+    获取推荐资讯列表（登录且有画像时按兴趣排序，否则从知识库随机抽取「换一批」秒回）
 
     ## 参数
     - limit: 返回数量限制（默认 3）
-    - offset: 分页偏移量
+    - offset: 分页偏移量（仅内置示例数据的分支使用）
+
+    个性化是**尽力而为**：未登录、新用户（无行为）、知识库不可用、画像全为退化向量
+    都回退到随机抽样，且 `source` 保持 knowledge_base —— 前端不需要感知差异，
+    推荐字段为 null 即表示本次不是个性化结果。
     """
-    # 优先从 Qdrant 知识库随机抽取（已抓取过的技术秒回，无需 LLM）
+    # 优先从 Qdrant 知识库取卡片（已抓取过的技术秒回，无需 LLM）
     items = None
     total = 0
     try:
         from src.modules.discovery.tech_knowledge import get_knowledge_base
         kb = get_knowledge_base()
-        items = kb.sample(limit, item_type="repo")
         total = kb.count("repo")
+        items = _personalized_items(kb, user, limit) or kb.sample(limit, item_type="repo")
     except Exception as e:
         logger.warning(f"[WARN] 知识库不可用: {e}")
 
@@ -175,7 +229,6 @@ async def get_recommended_news(
     # 知识库为空时回退到 Redis 旧缓存
     pool = get_feed_cache()
     if pool:
-        import random
         sample = random.sample(pool, min(limit, len(pool)))
         return {
             "items": sample,
