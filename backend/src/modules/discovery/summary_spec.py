@@ -114,3 +114,46 @@ def build_summary_prompt(items, kind: str = "repo") -> str:
 {subject}列表：
 {chr(10).join(lines)}"""
     return prompt
+
+
+# ==================== 中文导读（无中文 README 的兜底） ====================
+
+# 送入导读的 README 素材上限：README 动辄上万行，全量送既贵又会让模型抓不住重点。
+# 取前 N 字符足够覆盖「项目是干什么的」—— README 开头通常就是介绍与快速上手。
+MAX_DIGEST_SOURCE_CHARS = 8000
+
+# 导读正文的目标长度（按中文字符计）
+DIGEST_MIN_CHARS = 300
+DIGEST_MAX_CHARS = 500
+
+
+def build_digest_prompt(title: str, raw_description: str, readme: str) -> str:
+    """构建「中文导读」的 prompt。
+
+    与 build_summary_prompt 的分工：
+    - 摘要的素材只有 GitHub 一行描述，只能写 40~90 字，用于卡片三行内展示；
+    - 导读的素材是 README 原文，目标是让中文读者**不读原文也能判断值不值得看**，
+      所以要求长得多、也要分节。两者共用的硬约束是中文化。
+
+    「只基于给定材料」这条是刻意的：README 素材不足时，模型最省事的做法就是拿
+    GitHub 描述里的几个词扩写，很容易编出功能与性能数字。宁可少写一节。
+    """
+    excerpt = (readme or "").strip()[:MAX_DIGEST_SOURCE_CHARS]
+    desc = (raw_description or "").strip()[:300]
+    return f"""你是技术情报编辑，负责为中文读者写一份仓库 README 的**中文导读**。
+
+目标：让读者在不读英文原文的情况下，判断这个项目是什么、解决什么问题、值不值得进一步了解。
+
+写作要求：
+1. 必须用简体中文书写。仅专有名词与业界通用技术术语（如 Kubernetes、Rust、Docker、API、RAG）可保留英文，其余一律中文化，禁止出现成句的英文。
+2. 用 Markdown 组织，总长 {DIGEST_MIN_CHARS}~{DIGEST_MAX_CHARS} 个中文字符，结构为：开头一段总述（这是什么、给谁用），然后依次是 `### 它解决什么问题`、`### 核心能力`（无序列表，每项一句话）、`### 适合谁 / 典型场景`。
+3. **只基于给定材料**。材料没提到的功能、性能数字、对比结论一律不许写；信息不足的小节就少写或不写，宁可短也不要编造。
+4. 不要写「以下是导读」「按要求输出」之类的开场白或元话语，直接输出正文；不要输出代码块。
+5. 不要整段照抄英文原文，理解后用自己的话概括。
+
+仓库：{title}
+GitHub 描述：{desc or "（无）"}
+
+README 原文（可能被截断）：
+{excerpt or "（未取到 README 原文，只能依据上面的仓库名与描述推断；信息不足处请如实说明，不要编造。）"}
+"""

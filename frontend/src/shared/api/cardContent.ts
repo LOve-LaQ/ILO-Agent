@@ -1,5 +1,5 @@
 import { api } from './client';
-import type { CardContentResponse } from '../types/card';
+import type { CardContentResponse, CardDigestResponse } from '../types/card';
 
 /**
  * 卡片原文（仓库 README）快照 —— 「先读原文」页的数据来源。
@@ -16,4 +16,20 @@ import type { CardContentResponse } from '../types/card';
  */
 export function fetchCardContent(cardId: string): Promise<CardContentResponse> {
   return api.get<CardContentResponse>(`/discover/cards/${encodeURIComponent(cardId)}/content`);
+}
+
+/**
+ * 卡片中文导读（无中文 README 时的兜底）—— 「先读原文」页里可切到的一层中文概览。
+ *
+ * 【为什么与 fetchCardContent 分开】两者成本量级不同：原文是公开数据直取；
+ * 导读未命中缓存时后端会真实调用一次 LLM，所以它要求登录、并单独限流。
+ * 前端据此把「取不到」当作可降级情形处理（401 引导登录，其余退回原文视图），
+ * 而不是把整条阅读链路卡死。
+ *
+ * 后端始终返回 200（用 origin/reason 表达状态），故这里不需要处理业务 404：
+ * - origin='cache'/'generated'  有中文导读可展示
+ * - origin='unavailable'        生成不了，看 reason 并退回 fallback_description
+ */
+export function fetchCardDigest(cardId: string): Promise<CardDigestResponse> {
+  return api.get<CardDigestResponse>(`/discover/cards/${encodeURIComponent(cardId)}/digest`);
 }

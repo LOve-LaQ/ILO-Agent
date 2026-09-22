@@ -41,6 +41,7 @@ _RULES: dict[str, tuple[str, int]] = {
     # 裸奔的密码校验旁路），是入口加固里最容易漏掉的一类
     "discover:refresh:ip": ("discover_refresh_rate_limit_per_hour", 3600),
     "discover:content:ip": ("card_content_rate_limit_per_hour", 3600),
+    "discover:digest:ip": ("card_digest_rate_limit_per_hour", 3600),
     "password:reset:ip": ("password_reset_rate_limit_per_hour", 3600),
     "learning:chat:ip": ("learning_chat_rate_limit_per_hour", 3600),
     "account:cancel:ip": ("account_cancel_rate_limit_per_hour", 3600),
@@ -144,6 +145,7 @@ CAPTCHA_IP = RateLimitRule("captcha:ip")
 EMAIL_RESEND_IP = RateLimitRule("email:resend")
 DISCOVER_REFRESH_IP = RateLimitRule("discover:refresh:ip")
 CARD_CONTENT_IP = RateLimitRule("discover:content:ip")
+CARD_DIGEST_IP = RateLimitRule("discover:digest:ip")
 PASSWORD_RESET_IP = RateLimitRule("password:reset:ip")
 LEARNING_CHAT_IP = RateLimitRule("learning:chat:ip")
 ACCOUNT_CANCEL_IP = RateLimitRule("account:cancel:ip")
@@ -153,6 +155,7 @@ __all__ = [
     "ACCOUNT_CANCEL_IP",
     "CAPTCHA_IP",
     "CARD_CONTENT_IP",
+    "CARD_DIGEST_IP",
     "DISCOVER_REFRESH_IP",
     "EMAIL_RESEND_IP",
     "FORGOT_EMAIL",

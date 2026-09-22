@@ -201,6 +201,34 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/discover/cards/{card_id}/digest": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Card Digest
+         * @description 读一张卡片的中文导读（无中文 README 时的兜底）
+         *
+         *     - **要求登录**：读原文（/content）可以匿名，因为 README 本身就是公开内容；
+         *       但导读每次未命中缓存都会真实调用一次 LLM，是明确的付费放大面 ——
+         *       匿名开放等于让别人拿我们的 API Key 免费翻译，所以这里必须过登录墙。
+         *     - 按需生成 + 持久复用：命中缓存（且原文版本未变）零成本秒回，不重复付费
+         *     - 生成不了时返回 `origin=unavailable` 并带 `reason` 与 fallback_description，
+         *       由前端优雅降级，绝不阻塞「先读原文」这条主链路
+         *     - 仍保留 IP 限流：登录用户也可能被脚本驱动着反复打这个接口
+         */
+        get: operations["get_card_digest_api_v1_discover_cards__card_id__digest_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/auth/register": {
         parameters: {
             query?: never;
@@ -1202,6 +1230,54 @@ export interface components {
              * @enum {string}
              */
             origin: "snapshot" | "on_demand" | "unavailable";
+        };
+        /**
+         * CardDigestResponse
+         * @description GET /discover/cards/{card_id}/digest 响应（需登录）
+         *
+         *     大量仓库 README 只有英文，中文用户点开「先读原文」等于读不懂。这里给一份
+         *     **中文导读**：不是逐字译文，而是「这仓库是什么、解决什么、适合谁」的中文概览。
+         *
+         *     `origin` 决定前端展示方式：
+         *     - cache：命中已生成的导读（且原文版本未变）→ 零成本秒回
+         *     - generated：本次实时生成并已回写，查看原文后可再点一次即为 cache
+         *     - unavailable：生成不了，看 `reason`（no_readme / generation_failed / ...），
+         *       并用 fallback_description 优雅降级
+         */
+        CardDigestResponse: {
+            /** Card Id */
+            card_id: string;
+            /**
+             * Digest
+             * @description 中文导读正文（Markdown）
+             */
+            digest?: string | null;
+            /**
+             * Source Fingerprint
+             * @description 生成时原文版本的指纹（git blob sha，兜底为内容摘要）
+             */
+            source_fingerprint?: string | null;
+            /**
+             * Generated At
+             * @description 生成时间（ISO 8601）
+             */
+            generated_at?: string | null;
+            /**
+             * Fallback Description
+             * @description 生成不了时的兜底展示：采集时的原始简介
+             */
+            fallback_description?: string | null;
+            /**
+             * Origin
+             * @default unavailable
+             * @enum {string}
+             */
+            origin: "cache" | "generated" | "unavailable";
+            /**
+             * Reason
+             * @description origin=unavailable 时的原因，便于前端给出准确提示
+             */
+            reason?: string | null;
         };
         /**
          * CardListResponse
@@ -3017,6 +3093,109 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CardContentResponse"];
+                };
+            };
+            /** @description 业务错误（{code, message, detail}） */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 未登录 / 凭证无效或已过期 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 已登录但无权访问 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 状态冲突 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 请求过于频繁（限流，响应头带 Retry-After） */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 服务内部错误 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 上游依赖失败 */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_card_digest_api_v1_discover_cards__card_id__digest_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                card_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CardDigestResponse"];
                 };
             };
             /** @description 业务错误（{code, message, detail}） */

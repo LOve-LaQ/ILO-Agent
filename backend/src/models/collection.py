@@ -93,6 +93,18 @@ class CollectionRecord(Base):
     # 快照元信息：{path, sha, size, source, fetched_at}，用于回答「读的是哪个版本」
     content_meta: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
 
+    # 中文导读：大量仓库 README 只有英文，中文用户点开「先读原文」等于读不懂。
+    # 这里存一份**按需生成**的中文导读（不是逐字译文，而是「这仓库是什么、解决什么、
+    # 适合谁」的中文概览）。与 raw_content 一样是「生成一次、长期复用」的产物，
+    # 因此同样落在真相源表上，而不是塞进缓存。
+    # 为空 = 还没人生成过（而不是「生成了但没有」）。
+    content_digest_zh: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # 导读元信息：{source_fingerprint, source_chars, generated_at}。
+    # `source_fingerprint` 绑定的是**生成时那份原文**（sha 优先，raw CDN 路径退回
+    # 内容摘要），原文一改指纹就变，导读自动失效重生成 —— 否则会出现「译文对不上
+    # 原文版本」这种最难排查的错配。
+    content_digest_meta: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+
     collected_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )

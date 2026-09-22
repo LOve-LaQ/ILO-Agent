@@ -29,5 +29,8 @@ export type CardContentResponse = components['schemas']['CardContentResponse'];
 /** 原文快照的版本信息（path / sha / 截断标记等） */
 export type CardContentMeta = components['schemas']['CardContentMeta'];
 
+/** GET /discover/cards/{card_id}/digest 的响应：README 的中文导读（需登录） */
+export type CardDigestResponse = components['schemas']['CardDigestResponse'];
+
 /** POST /discover/refresh 与 POST /discover/refresh-articles 的响应 */
 export type RefreshResponse = components['schemas']['RefreshResponse'];

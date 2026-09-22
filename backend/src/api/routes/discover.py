@@ -17,11 +17,12 @@ import os
 import redis as redis_lib
 from loguru import logger
 
-from src.api.deps import OptionalUser
+from src.api.deps import CurrentUser, OptionalUser
 from src.core.errors import ERROR_RESPONSES, ILOException
-from src.core.rate_limit import CARD_CONTENT_IP, DISCOVER_REFRESH_IP, rate_limit
+from src.core.rate_limit import CARD_CONTENT_IP, CARD_DIGEST_IP, DISCOVER_REFRESH_IP, rate_limit
 from src.schemas.discover import (
     CardContentResponse,
+    CardDigestResponse,
     CardListResponse,
     ProvenanceResponse,
     RefreshResponse,
@@ -501,6 +502,27 @@ async def get_card_content(card_id: str) -> Dict[str, Any]:
     from src.services.collection_service import get_or_fetch_card_content
 
     return await get_or_fetch_card_content(card_id)
+
+
+@router.get(
+    "/cards/{card_id}/digest",
+    response_model=CardDigestResponse,
+    dependencies=[Depends(rate_limit(CARD_DIGEST_IP))],
+)
+async def get_card_digest(card_id: str, user: CurrentUser) -> Dict[str, Any]:
+    """读一张卡片的中文导读（无中文 README 时的兜底）
+
+    - **要求登录**：读原文（/content）可以匿名，因为 README 本身就是公开内容；
+      但导读每次未命中缓存都会真实调用一次 LLM，是明确的付费放大面 ——
+      匿名开放等于让别人拿我们的 API Key 免费翻译，所以这里必须过登录墙。
+    - 按需生成 + 持久复用：命中缓存（且原文版本未变）零成本秒回，不重复付费
+    - 生成不了时返回 `origin=unavailable` 并带 `reason` 与 fallback_description，
+      由前端优雅降级，绝不阻塞「先读原文」这条主链路
+    - 仍保留 IP 限流：登录用户也可能被脚本驱动着反复打这个接口
+    """
+    from src.services.collection_service import get_or_generate_content_digest
+
+    return await get_or_generate_content_digest(card_id)
 
 
 # 测试运行

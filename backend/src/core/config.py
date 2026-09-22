@@ -81,6 +81,9 @@ class Settings(BaseSettings):
     discover_refresh_rate_limit_per_hour: int = 20
     # 原文按需补抓（/discover/cards/{id}/content）：匿名可触发一次外部抓取并回写
     card_content_rate_limit_per_hour: int = 60
+    # 中文导读（/discover/cards/{id}/digest）：每次未命中缓存都要真实调用 LLM 读
+    # README 并生成导读，是明确的付费放大面 —— 配额比原文接口更紧
+    card_digest_rate_limit_per_hour: int = 30
     # 重置密码：独立的 IP 维度配额，不与 captcha 校验共用一个桶（否则互相抢占）
     password_reset_rate_limit_per_hour: int = 10
     # 学习问答（/learning/chat）：每轮都真实调用 LLM，是成本最高的常规接口

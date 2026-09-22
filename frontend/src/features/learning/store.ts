@@ -1,9 +1,12 @@
 import { create } from 'zustand';
 
 import { onSessionReset } from '../../shared/lib/sessionBus';
-import type { CardContentResponse, TechCard } from '../../shared/types/card';
+import type { CardContentResponse, CardDigestResponse, TechCard } from '../../shared/types/card';
 
 export type LearningState = 'idle' | 'loading' | 'reading' | 'explanation' | 'chatting';
+
+/** 阅读态内的视图：读英文原文，还是读 AI 生成的中文导读 */
+export type ReadingView = 'original' | 'digest';
 
 export interface ChatMessage {
   role: 'user' | 'assistant';
@@ -26,6 +29,18 @@ interface LearningStoreState {
   /** 原文快照（reading 态展示）；会话创建被延后，所以它早于 sessionId 存在 */
   content: CardContentResponse | null;
   /**
+   * 中文导读（reading 态按需展示）。
+   *
+   * 与 content 分开存：原文与导读是同一张卡片的两个视图，用户可来回切换，
+   * 互不覆盖；且导读按需拉取（未命中缓存时后端会真实调用 LLM），所以它有
+   * 独立的 pending 与「可用/不可用」状态，不与原文的加载耦合。
+   */
+  digest: CardDigestResponse | null;
+  /** 中文导读是否正在生成/拉取中 */
+  digestPending: boolean;
+  /** reading 态当前展示的是原文还是中文导读 */
+  readView: ReadingView;
+  /**
    * 会话主题。
    *
    * 从服务端恢复历史会话时未必拿得到卡片（卡片可能已不在知识库里），
@@ -44,6 +59,9 @@ interface LearningStoreState {
   setSessionId: (sessionId: string | null) => void;
   setCard: (card: TechCard | null) => void;
   setContent: (content: CardContentResponse | null) => void;
+  setDigest: (digest: CardDigestResponse | null) => void;
+  setDigestPending: (pending: boolean) => void;
+  setReadView: (view: ReadingView) => void;
   setTopic: (topic: string) => void;
   setExplanation: (explanation: string) => void;
   setMessages: (messages: ChatMessage[]) => void;
@@ -59,6 +77,9 @@ const INITIAL_STATE = {
   sessionId: null,
   card: null,
   content: null,
+  digest: null,
+  digestPending: false,
+  readView: 'original' as ReadingView,
   topic: '',
   explanation: '',
   messages: [] as ChatMessage[],
@@ -75,6 +96,9 @@ export const useLearningStore = create<LearningStoreState>((set) => ({
   setSessionId: (sessionId) => set({ sessionId }),
   setCard: (card) => set({ card }),
   setContent: (content) => set({ content }),
+  setDigest: (digest) => set({ digest }),
+  setDigestPending: (digestPending) => set({ digestPending }),
+  setReadView: (readView) => set({ readView }),
   setTopic: (topic) => set({ topic }),
   setExplanation: (explanation) => set({ explanation }),
   setMessages: (messages) => set({ messages }),

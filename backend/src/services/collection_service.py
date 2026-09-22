@@ -13,6 +13,8 @@
 「只用 Redis」，保证无库环境下 demo 仍可用。
 """
 
+import asyncio
+import hashlib
 import os
 import uuid
 from dataclasses import dataclass
@@ -547,6 +549,181 @@ async def get_or_fetch_card_content(item_id: str) -> Dict[str, Any]:
         "truncated": bool(fetched["meta"].get("truncated")),
         "origin": "on_demand",
     }
+
+
+# ==================== 中文导读（无中文 README 的兜底） ====================
+
+
+def _digest_payload(item_id: str) -> Dict[str, Any]:
+    """中文导读响应的空骨架（origin / reason 由调用方按实际情况填）"""
+    return {
+        "card_id": item_id,
+        "digest": None,
+        "source_fingerprint": None,
+        "generated_at": None,
+        "fallback_description": None,
+        "origin": "unavailable",
+        "reason": None,
+    }
+
+
+def _content_fingerprint(meta: Dict[str, Any], content: str) -> str:
+    """原文指纹：绑定「这份导读是针对哪一版原文生成的」。
+
+    优先用 git blob sha（权威且廉价）；raw CDN 兜底路径拿不到 sha 时退回内容摘要 ——
+    不能因为拿不到 sha 就退化成「永不过期」，那样 README 更新后导读会一直对不上原文，
+    而用户看到的中文和英文原文说的不是一回事，是最难排查的一类错配。
+    """
+    sha = (meta or {}).get("sha")
+    if sha:
+        return str(sha)
+    return hashlib.md5((content or "").encode("utf-8")).hexdigest()
+
+
+def _write_content_digest(item_id: str, digest: str, meta: Dict[str, Any]) -> None:
+    """回写中文导读。
+
+    与原文快照的「只写一次」不同，这里**允许覆盖**：原文更新后正是靠覆盖来刷新导读，
+    所以不能带 `IS NULL` 条件（那样旧导读会永远钉在库里）。
+    """
+    try:
+        with get_session_factory()() as session:
+            session.execute(
+                update(CollectionRecord)
+                .where(CollectionRecord.item_id == item_id)
+                .values(content_digest_zh=digest, content_digest_meta=meta)
+            )
+            session.commit()
+    except Exception as e:  # noqa: BLE001 - 回写失败不影响本次返回
+        logger.warning(f"[WARN] 回写中文导读失败: {item_id} - {e}")
+
+
+async def _generate_digest(record: CollectionRecord, item_id: str, content: str) -> Optional[str]:
+    """调用 LLM 生成中文导读；模型不可用或输出不合格时返回 None（调用方据此降级）"""
+    from src.modules.discovery.summary_spec import build_digest_prompt, is_chinese_text
+
+    try:
+        from src.modules.agent.state_machine import summary_llm
+    except Exception as e:  # noqa: BLE001 - 模型载入失败要如实降级，不能连带端点报错
+        logger.warning(f"[WARN] 载入摘要模型失败，无法生成中文导读: {e}")
+        return None
+    if summary_llm is None:
+        logger.warning("[WARN] 摘要模型不可用，无法生成中文导读")
+        return None
+
+    # 标题优先取入库快照，其次从 source_url 反推 owner/repo
+    from src.modules.discovery.github_fetcher import repo_full_name
+
+    title = (
+        (record.card_payload or {}).get("title")
+        or repo_full_name(record.source_url)
+        or item_id
+    )
+
+    prompt = build_digest_prompt(
+        title=title,
+        raw_description=record.raw_description or "",
+        readme=content,
+    )
+    try:
+        result = await asyncio.to_thread(summary_llm.invoke, prompt)
+    except Exception as e:  # noqa: BLE001 - 生成失败降级，不让端点 500
+        logger.warning(f"[WARN] 中文导读生成失败: {item_id} - {e}")
+        return None
+
+    digest = (getattr(result, "content", "") or "").strip()
+    # 与卡片摘要同一道中文化闸门：模型偶尔会用英文作答，放行就等于白花一次钱
+    if not is_chinese_text(digest):
+        logger.warning(f"[WARN] 中文导读输出非中文，丢弃: {item_id} - {digest[:60]!r}")
+        return None
+    return digest
+
+
+async def get_or_generate_content_digest(item_id: str) -> Dict[str, Any]:
+    """取一张卡片的中文导读；没有就按需生成一次并长期复用。
+
+    `origin` 语义（前端据此决定展示方式）：
+    - `cache`       命中本地导读且原文版本未变 → 零成本直接返回
+    - `generated`   本次实时生成并已回写，后续请求会变成 cache
+    - `unavailable` 生成不了（没有原文 / 模型不可用 / 输出不合格），带 `reason` 与
+                    `fallback_description`，由前端优雅降级
+
+    原文缺失时会先走一次按需补抓（复用 get_or_fetch_card_content），这样存量卡片
+    第一次点「中文导读」也能用，而不是要求用户先去点一次原文。
+    """
+    from src.modules.discovery.summary_spec import is_chinese_text
+
+    payload = _digest_payload(item_id)
+    if not is_database_configured():
+        payload["reason"] = "db_unavailable"
+        return payload
+
+    try:
+        with get_session_factory()() as session:
+            record = session.execute(
+                select(CollectionRecord).where(CollectionRecord.item_id == item_id)
+            ).scalar_one_or_none()
+    except Exception as e:  # noqa: BLE001 - 读库失败不该让详情页炸掉
+        logger.warning(f"[WARN] 读取卡片导读失败: {item_id} - {e}")
+        payload["reason"] = "db_error"
+        return payload
+
+    if record is None:
+        payload["reason"] = "not_found"
+        return payload
+
+    payload["fallback_description"] = record.raw_description
+
+    content = record.raw_content
+    meta = record.content_meta or {}
+    if not content:
+        fetched = await get_or_fetch_card_content(item_id)
+        content = fetched.get("content")
+        meta = fetched.get("meta") or {}
+
+    if not content:
+        # 没有原文就没有素材，绝不靠「标题 + 一行描述」硬编一份导读
+        payload["reason"] = "no_readme"
+        return payload
+
+    fingerprint = _content_fingerprint(meta, content)
+    cached_meta = record.content_digest_meta or {}
+    cached = record.content_digest_zh
+    if cached and is_chinese_text(cached) and cached_meta.get("source_fingerprint") == fingerprint:
+        payload.update(
+            {
+                "digest": cached,
+                "source_fingerprint": fingerprint,
+                "generated_at": cached_meta.get("generated_at"),
+                "origin": "cache",
+            }
+        )
+        return payload
+
+    digest = await _generate_digest(record, item_id, content)
+    if not digest:
+        payload["reason"] = "generation_failed"
+        return payload
+
+    generated_at = datetime.now(timezone.utc).isoformat()
+    _write_content_digest(
+        item_id,
+        digest,
+        {
+            "source_fingerprint": fingerprint,
+            "source_chars": len(content),
+            "generated_at": generated_at,
+        },
+    )
+    payload.update(
+        {
+            "digest": digest,
+            "source_fingerprint": fingerprint,
+            "generated_at": generated_at,
+            "origin": "generated",
+        }
+    )
+    return payload
 
 
 # ==================== 编排 ====================

@@ -138,3 +138,34 @@ class CardContentResponse(BaseModel):
         None, description="抓不到原文时的兜底展示：采集时的原始简介"
     )
     origin: Literal["snapshot", "on_demand", "unavailable"] = "unavailable"
+
+
+# ==================== 中文导读（无中文 README 的兜底） ====================
+
+
+class CardDigestResponse(BaseModel):
+    """GET /discover/cards/{card_id}/digest 响应（需登录）
+
+    大量仓库 README 只有英文，中文用户点开「先读原文」等于读不懂。这里给一份
+    **中文导读**：不是逐字译文，而是「这仓库是什么、解决什么、适合谁」的中文概览。
+
+    `origin` 决定前端展示方式：
+    - cache：命中已生成的导读（且原文版本未变）→ 零成本秒回
+    - generated：本次实时生成并已回写，查看原文后可再点一次即为 cache
+    - unavailable：生成不了，看 `reason`（no_readme / generation_failed / ...），
+      并用 fallback_description 优雅降级
+    """
+
+    card_id: str
+    digest: Optional[str] = Field(None, description="中文导读正文（Markdown）")
+    source_fingerprint: Optional[str] = Field(
+        None, description="生成时原文版本的指纹（git blob sha，兜底为内容摘要）"
+    )
+    generated_at: Optional[str] = Field(None, description="生成时间（ISO 8601）")
+    fallback_description: Optional[str] = Field(
+        None, description="生成不了时的兜底展示：采集时的原始简介"
+    )
+    origin: Literal["cache", "generated", "unavailable"] = "unavailable"
+    reason: Optional[str] = Field(
+        None, description="origin=unavailable 时的原因，便于前端给出准确提示"
+    )

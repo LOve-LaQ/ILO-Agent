@@ -3,7 +3,7 @@ import { useCallback, useRef } from 'react';
 
 import { useToastStore } from '../../../components/ui/toastStore';
 import { useAccessToken } from '../../../shared/api/authToken';
-import { fetchCardContent } from '../../../shared/api/cardContent';
+import { fetchCardContent, fetchCardDigest } from '../../../shared/api/cardContent';
 import { ApiError } from '../../../shared/api/client';
 import {
   fetchSessionDetail,
@@ -46,6 +46,10 @@ export function useLearningSession() {
   const sessionId = useLearningStore((s) => s.sessionId);
   const card = useLearningStore((s) => s.card);
   const content = useLearningStore((s) => s.content);
+  const digest = useLearningStore((s) => s.digest);
+  const digestPending = useLearningStore((s) => s.digestPending);
+  const readView = useLearningStore((s) => s.readView);
+  const setReadView = useLearningStore((s) => s.setReadView);
   const topic = useLearningStore((s) => s.topic);
   const explanation = useLearningStore((s) => s.explanation);
   const messages = useLearningStore((s) => s.messages);
@@ -73,6 +77,9 @@ export function useLearningSession() {
     store.setState('reading');
     store.setSessionId(null);
     store.setContent(null);
+    store.setDigest(null);
+    store.setDigestPending(false);
+    store.setReadView('original');
     store.setExplanation('');
     store.setMessages([]);
     store.setPending(false);
@@ -124,6 +131,45 @@ export function useLearningSession() {
       showToast('⚠️ 会话创建失败，已使用本地卡片要点讲解');
       store.setExplanation(buildExplanation(card));
       store.setState('explanation');
+    }
+  }, [showToast]);
+
+  /**
+   * 切到「中文导读」视图，并确保拿到内容。
+   *
+   * 未命中缓存时后端会真实调用一次 LLM（故它要求登录、单独限流），据此：
+   * - 已经拿过就直接切视图，不重复付费；
+   * - 401 说明未登录 → 提示并留在原文视图，不把用户丢进一个空白导读页；
+   * - 其它失败也退回原文视图（这兜的是网络/网关级异常；后端自身的「生成不了」
+   *   是正常响应 origin='unavailable'，不抛错，交给视图层按 reason 展示）。
+   */
+  const loadDigest = useCallback(async () => {
+    const store = useLearningStore.getState();
+    const card = store.card;
+    if (!card) return;
+    if (store.digest) {
+      store.setReadView('digest');
+      return;
+    }
+
+    store.setReadView('digest');
+    store.setDigestPending(true);
+    try {
+      const data = await fetchCardDigest(card.id);
+      // 请求回来时用户可能已切到别的卡片，别把结果写到别人头上
+      if (useLearningStore.getState().card?.id !== card.id) return;
+      useLearningStore.getState().setDigest(data);
+    } catch (error) {
+      if (useLearningStore.getState().card?.id !== card.id) return;
+      console.warn('读取中文导读失败:', error);
+      store.setReadView('original');
+      if (error instanceof ApiError && error.status === 401) {
+        showToast('请先登录再查看中文导读');
+      } else {
+        showToast('中文导读暂时不可用，请稍后重试');
+      }
+    } finally {
+      useLearningStore.getState().setDigestPending(false);
     }
   }, [showToast]);
 
@@ -227,6 +273,10 @@ export function useLearningSession() {
     sessionId,
     card,
     content,
+    digest,
+    digestPending,
+    readView,
+    setReadView,
     topic,
     explanation,
     messages,
@@ -235,6 +285,7 @@ export function useLearningSession() {
     setQuestion,
     startLearning,
     startChatting,
+    loadDigest,
     showCardPoints,
     send,
     close,

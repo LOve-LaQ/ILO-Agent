@@ -10,7 +10,20 @@ import styles from './LearningDrawer.module.css';
  * 学习会话抽屉：四态 reading（先读原文）/ loading（建会话）/ explanation（卡片要点）
  * / chatting（问答）。
  * 对应原 index.html 的 .drawer 区块，并新增「原文优先」的阅读态。
+ *
+ * 阅读态内还有一层视图切换：`original`（英文原文快照）↔ `digest`（AI 中文导读）。
+ * 大量仓库 README 只有英文，导读是给中文读者的「不读原文也能判断值不值得看」的兜底。
  */
+
+/** 中文导读生成不了时的原因 → 面向用户的中文提示（后端 reason 见 CardDigestResponse） */
+const DIGEST_REASON_TEXT: Record<string, string> = {
+  no_readme: '这个仓库暂时取不到 README 原文，无法生成中文导读。',
+  generation_failed: '中文导读生成失败，请稍后重试。',
+  not_found: '找不到这张卡片的采集记录，无法生成中文导读。',
+  db_unavailable: '数据服务暂时不可用，请稍后重试。',
+  db_error: '读取数据失败，请稍后重试。',
+};
+
 export function LearningDrawer() {
   const {
     open,
@@ -18,6 +31,10 @@ export function LearningDrawer() {
     sessionId,
     card,
     content,
+    digest,
+    digestPending,
+    readView,
+    setReadView,
     topic,
     explanation,
     messages,
@@ -25,6 +42,7 @@ export function LearningDrawer() {
     question,
     setQuestion,
     startChatting,
+    loadDigest,
     showCardPoints,
     send,
     close,
@@ -75,7 +93,9 @@ export function LearningDrawer() {
             <div className={styles.title}>{title}</div>
             <div className={styles.sub}>
               {state === 'reading' ? (
-                '原文快照 · 先读一读，有疑问再提问'
+                readView === 'digest'
+                  ? 'AI 中文导读 · 依据 README 生成，仅供参考'
+                  : '原文快照 · 先读一读，有疑问再提问'
               ) : (
                 <>
                   会话 <span>{sessionId || '…'}</span> · DeepSeek 驱动
@@ -97,7 +117,18 @@ export function LearningDrawer() {
 
         {state === 'reading' && (
           <div className={styles.reading}>
-            {content ? (
+            {readView === 'digest' ? (
+              <div className={styles.sourceBar}>
+                <span>AI 中文导读</span>
+                {digest?.origin === 'generated' ? <code>本次生成</code> : null}
+                {digest?.origin === 'cache' ? <code>已缓存</code> : null}
+                {sourceUrl ? (
+                  <a href={sourceUrl} target="_blank" rel="noopener noreferrer">
+                    打开仓库 ↗
+                  </a>
+                ) : null}
+              </div>
+            ) : content ? (
               <div className={styles.sourceBar}>
                 {content.origin === 'unavailable' ? (
                   <span className={styles.sourceWarn}>
@@ -122,7 +153,28 @@ export function LearningDrawer() {
             ) : null}
 
             <div className={styles.readBody}>
-              {!content ? (
+              {readView === 'digest' ? (
+                digestPending ? (
+                  <p className={styles.readPlaceholder}>正在生成中文导读…（首次会调用一次模型）</p>
+                ) : digest?.digest ? (
+                  <>
+                    <MarkdownBody content={digest.digest} allowImages={false} />
+                    <p className={styles.readNote}>
+                      AI 依据 README 生成的中文导读，仅供快速了解，细节以原文为准。
+                    </p>
+                  </>
+                ) : (
+                  <>
+                    <p className={styles.readPlaceholder}>
+                      {DIGEST_REASON_TEXT[digest?.reason ?? ''] ||
+                        '中文导读暂时不可用，请稍后重试。'}
+                    </p>
+                    {digest?.fallback_description ? (
+                      <p className={styles.readNote}>{digest.fallback_description}</p>
+                    ) : null}
+                  </>
+                )
+              ) : !content ? (
                 <p className={styles.readPlaceholder}>正在获取原文…</p>
               ) : content.content ? (
                 <>
@@ -150,6 +202,15 @@ export function LearningDrawer() {
             </div>
 
             <div className={styles.readActions}>
+              {readView === 'digest' ? (
+                <button className="btn" type="button" onClick={() => setReadView('original')}>
+                  📄 看原文
+                </button>
+              ) : (
+                <button className="btn" type="button" onClick={() => void loadDigest()}>
+                  🌐 中文导读
+                </button>
+              )}
               <button className="btn" type="button" onClick={showCardPoints}>
                 📌 卡片要点
               </button>
