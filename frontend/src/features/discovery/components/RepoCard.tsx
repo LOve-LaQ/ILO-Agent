@@ -49,6 +49,14 @@ export function RepoCard({ card, onStartLearning }: RepoCardProps) {
         {cardText(card)}
       </p>
 
+      {/* 个性化推荐理由：仅登录且有画像时后端下发，匿名/新用户为 null 时不占位 */}
+      {card.recommend_reason ? (
+        <p className={styles.reason}>
+          <span className={styles.reasonLabel}>为你推荐</span>
+          {card.recommend_reason}
+        </p>
+      ) : null}
+
       <div className={styles.tags}>
         {card.category ? (
           <span className={clsx(styles.tag, styles.cat)}>{catLabel(card.category)}</span>

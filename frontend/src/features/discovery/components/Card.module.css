@@ -84,6 +84,25 @@
   font-weight: 500;
 }
 
+/* ============ 个性化推荐理由 ============ */
+.reason {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--text-2);
+  background: var(--brand-weak);
+  border-radius: 6px;
+  padding: 6px 9px;
+}
+
+.reasonLabel {
+  flex: none;
+  color: var(--brand);
+  font-weight: 600;
+}
+
 /* ============ 卡片脚 ============ */
 .cardFoot {
   border-top: 1px solid var(--border);

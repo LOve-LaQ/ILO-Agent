@@ -13,11 +13,15 @@ export interface paths {
         };
         /**
          * Get Recommended News
-         * @description 获取推荐资讯列表（优先从知识库随机抽取，实现「换一批」秒回）
+         * @description 获取推荐资讯列表（登录且有画像时按兴趣排序，否则从知识库随机抽取「换一批」秒回）
          *
          *     ## 参数
          *     - limit: 返回数量限制（默认 3）
-         *     - offset: 分页偏移量
+         *     - offset: 分页偏移量（仅内置示例数据的分支使用）
+         *
+         *     个性化是**尽力而为**：未登录、新用户（无行为）、知识库不可用、画像全为退化向量
+         *     都回退到随机抽样，且 `source` 保持 knowledge_base —— 前端不需要感知差异，
+         *     推荐字段为 null 即表示本次不是个性化结果。
          */
         get: operations["get_recommended_news_api_v1_discover_news_get"];
         put?: never;
@@ -2290,6 +2294,16 @@ export interface components {
             batch_id?: string | null;
             /** Raw Description */
             raw_description?: string | null;
+            /**
+             * Recommend Score
+             * @description 兴趣推荐分（0~1，越接近 1 越贴近画像）
+             */
+            recommend_score?: number | null;
+            /**
+             * Recommend Reason
+             * @description 推荐理由（一句话中文；非个性化时为 null）
+             */
+            recommend_reason?: string | null;
         };
         /**
          * TokenResponse
