@@ -11,6 +11,8 @@ services:
   redis:
     image: redis:alpine
     container_name: ilo-agent-redis
+    # Docker Desktop 重启后容器会被停止且不会自恢复，必须显式声明重启策略
+    restart: unless-stopped
     ports:
       - "6379:6379"
     volumes:
@@ -26,6 +28,9 @@ services:
   qdrant:
     image: qdrant/qdrant
     container_name: ilo-agent-qdrant
+    # 同上：没有重启策略时，Docker Desktop 一重启 Qdrant 就静默停摆，
+    # 首页会降级成 FALLBACK_NEWS 的 3 条示例卡片
+    restart: unless-stopped
     ports:
       - "6333:6333"
     volumes:
