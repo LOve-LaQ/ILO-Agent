@@ -333,15 +333,42 @@ async def summarize_items(items: List[Dict[str, Any]], kind: str = "repo", batch
 
 
 def _apply_summary(item: Dict[str, Any], parsed: Dict[str, Any]):
-    """把 LLM 结构化结果映射到卡片字段（同时兼容旧字段）"""
-    from src.modules.discovery.summary_spec import CATEGORIES
+    """把 LLM 结构化结果映射到卡片字段（同时兼容旧字段）
+
+    中文化闸门：LLM 偶尔会照抄英文原文（尤其是输入本身就是英文描述时）。一旦放过，
+    卡片介绍就直接变成英文，而且因为已经写进知识库，只有下一轮采集再次遇到同一个
+    仓库才有机会覆盖 —— 绝大多数情况就是永久英文。所以这里先校验中文，不合格的
+    一律丢弃，并**摘掉 item 上残留的英文原描述**，让它保持「未完成」状态被标
+    failed 等待重试（collect_items 会据此拒绝入库）。
+    """
+    from src.modules.discovery.summary_spec import CATEGORIES, is_chinese_text
+
+    one_liner = (parsed.get("one_liner") or "").strip()
+    problem = (parsed.get("problem") or "").strip()
+    intro = (parsed.get("summary") or "").strip()
+
+    # 中文闸门：卡片主文案与一句话定位都必须含足量汉字
+    if not is_chinese_text(intro):
+        if intro:
+            print(f"[WARN] 摘要非中文，丢弃: {intro[:60]!r}")
+        intro = ""
+    if not is_chinese_text(one_liner):
+        one_liner = ""
+
+    if not intro and not one_liner:
+        # 一个可用的中文字段都没有 → 本次摘要视为失败：摘掉英文原描述并清掉 category，
+        # 让 collect_items 判为「未完成」（不入库、也拿不到去重标记，下次会重试）。
+        # 清之前先把原描述落到 raw_description，保证溯源字段不因这次失败而丢内容。
+        if not item.get("raw_description"):
+            item["raw_description"] = item.get("summary")
+        item.pop("category", None)
+        item.pop("summary", None)
+        print(f"[WARN] 摘要未产出中文内容，将重试: {item.get('title')}")
+        return
 
     category = parsed.get("category")
     if category not in CATEGORIES:
         category = "other"
-    one_liner = (parsed.get("one_liner") or "").strip()
-    problem = (parsed.get("problem") or "").strip()
-    intro = (parsed.get("summary") or "").strip()
     tech_stack = parsed.get("tech_stack") or []
     highlights = parsed.get("highlights") or []
     use_cases = parsed.get("use_cases") or []

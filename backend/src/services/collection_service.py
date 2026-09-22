@@ -566,8 +566,16 @@ class CollectResult:
 
 
 def _summary_applied(item: Dict[str, Any]) -> bool:
-    """摘要是否成功落到卡片上（_apply_summary 必定写入 category）"""
-    return "category" in item
+    """摘要是否成功且**中文化**地落到卡片上。
+
+    两道闸门缺一不可：
+    1. `category` 存在 —— `_apply_summary` 走完的痕迹（分类受控，必然写入）
+    2. `summary` 是中文 —— 摘要失败时卡片上留的是 GitHub 英文原描述，
+       只看 category 会把它放行，卡片介绍就直接变英文了
+    """
+    from src.modules.discovery.summary_spec import is_chinese_text
+
+    return "category" in item and is_chinese_text(item.get("summary") or "")
 
 
 async def collect_items(
@@ -661,6 +669,17 @@ async def collect_items(
             # 不要求摘要时，卡片按原样就是终态
             finalized = True if not summarize else _summary_applied(item)
 
+            # 未通过摘要闸门的卡片**绝不能入库**：卡片介绍直接展示 summary，一旦把
+            # 「摘要没跑成、还带着英文原描述」的卡片写进知识库，用户看到的就是一张
+            # 英文卡片，而且它只有在下一轮采集再次碰到同一个仓库时才可能被覆盖
+            # （榜单早已换了一批）。所以入库必须后置到闸门之后。
+            if not finalized:
+                failed_count += 1
+                if persist:
+                    record_item(batch_id, item, status="failed")
+                logger.warning(f"[WARN] 摘要未中文化，暂不入库: {item_id}")
+                continue
+
             if store is not None:
                 try:
                     await store(item)
@@ -672,14 +691,9 @@ async def collect_items(
                     # 不写 Redis 标记：下次还能重试，避免「永久丢失」被缓存掩盖
                     continue
 
-            if finalized:
-                if persist:
-                    record_item(batch_id, item, status="summarized")
-                    _redis_mark([item_id])
-            else:
-                failed_count += 1
-                if persist:
-                    record_item(batch_id, item, status="failed")
+            if persist:
+                record_item(batch_id, item, status="summarized")
+                _redis_mark([item_id])
 
         if failed_count == 0:
             batch_status = "succeeded"
