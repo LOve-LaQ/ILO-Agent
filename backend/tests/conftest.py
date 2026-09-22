@@ -102,6 +102,9 @@ _DB_CONSUMER_MODULES = (
     "src.services.activity_service",
     "src.services.bookmark_service",
     "src.services.collection_service",
+    # 兴趣画像会查用户行为表：契约测试里注的是假用户，真查库既慢又没意义，
+    # 必须一并关掉（否则 /discover/news 的个性化分支会真的去连开发库）
+    "src.services.interest_profile",
     "src.services.learning_service",
 )
 _REAL_DB_TEST_MODULES = {

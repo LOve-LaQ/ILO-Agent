@@ -201,6 +201,54 @@ class TechKnowledgeBase:
         sample = random.sample(points, min(n, len(points)))
         return [p.payload for p in sample]
 
+    def candidate_points(self, item_type: str = None, limit: int = 500) -> List[Dict[str, Any]]:
+        """取**带向量**的候选集合：`[{"payload": {...}, "vector": [...]}]`
+
+        与 `sample()` 的两个区别，都是个性化排序需要的：
+        - **带向量**：排序靠余弦相似度，不取向量就没得算；
+        - **不随机**：随机抽样会把「最相关的那张」直接抽掉，排序就失去意义。
+
+        向量缺失的条目仍会返回（vector=None），由排序器统一按退化处理，
+        这样「多少张没向量」在调用侧可见，不会静默消失。
+        """
+        scroll_filter = None
+        if item_type:
+            scroll_filter = Filter(must=[FieldCondition(key="type", match=MatchValue(value=item_type))])
+
+        points = []
+        offset = None
+        while len(points) < limit:
+            try:
+                batch, offset = self.qdrant.scroll(
+                    collection_name=COLLECTION,
+                    scroll_filter=scroll_filter,
+                    limit=min(500, limit - len(points)),
+                    offset=offset,
+                    with_payload=True,
+                    with_vectors=True,
+                )
+            except Exception as e:
+                print(f"[WARN] candidate_points failed: {e}")
+                break
+            if not batch:
+                break
+            points.extend(batch)
+            if offset is None:
+                break
+
+        candidates: List[Dict[str, Any]] = []
+        for p in points:
+            vector = p.vector
+            if isinstance(vector, dict):  # 命名向量配置下取第一个（本库是单向量）
+                vector = next(iter(vector.values()), None)
+            candidates.append(
+                {
+                    "payload": p.payload or {},
+                    "vector": list(vector) if vector else None,
+                }
+            )
+        return candidates
+
     def list_by_category(self, category: str, n: int = 50) -> List[Dict[str, Any]]:
         """按分类标签查询卡片（用于「技术百科」板块）"""
         try:
@@ -232,6 +280,40 @@ class TechKnowledgeBase:
         if points:
             return points[0].payload
         return None
+
+    def get_vectors_by_ids(self, item_ids) -> Dict[str, List[float]]:
+        """批量按 id 取**已存向量**，返回 {item_id: vector}。
+
+        兴趣画像要复用卡片入库时的向量，而不是拿 summary 重新 embed：重新 embed 既
+        多付一次 embedding 成本，又可能与入库向量不在同一个语义空间（换过模型）。
+        与 get_by_ids 一样走批量 scroll，只是带上向量。
+
+        无向量的条目直接不出现在结果里，由调用方当作「不可用」跳过。
+        """
+        ids = [str(i) for i in item_ids if i]
+        if not ids:
+            return {}
+        try:
+            points, _ = self.qdrant.scroll(
+                collection_name=COLLECTION,
+                scroll_filter=Filter(must=[FieldCondition(key="id", match=MatchAny(any=ids))]),
+                limit=len(ids),
+                with_payload=True,
+                with_vectors=True,
+            )
+        except Exception as e:
+            print(f"[WARN] get_vectors_by_ids failed: {e}")
+            return {}
+
+        vectors: Dict[str, List[float]] = {}
+        for p in points:
+            item_id = (p.payload or {}).get("id")
+            vector = p.vector
+            if isinstance(vector, dict):  # 命名向量配置下取第一个（本库是单向量）
+                vector = next(iter(vector.values()), None)
+            if item_id and vector:
+                vectors[str(item_id)] = list(vector)
+        return vectors
 
     def get_by_ids(self, item_ids) -> Dict[str, Dict[str, Any]]:
         """批量按 id 查询，返回 {item_id: payload}。

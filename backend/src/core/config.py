@@ -88,6 +88,9 @@ class Settings(BaseSettings):
     password_reset_rate_limit_per_hour: int = 10
     # 学习问答（/learning/chat）：每轮都真实调用 LLM，是成本最高的常规接口
     learning_chat_rate_limit_per_hour: int = 60
+    # 首屏资讯（/discover/news）：本身是廉价读，但登录用户会走一次向量检索 +
+    # 全量候选排序；不给额度就留下一个可脚本化放大的读口（每刷一次都扫全库）
+    news_rate_limit_per_hour: int = 600
     # 撤销注销（/auth/account/delete/cancel）：未登录可调且要校验密码，
     # 不设防就会变成绕开登录锁定的口令爆破旁路
     account_cancel_rate_limit_per_hour: int = 10
@@ -137,6 +140,16 @@ class Settings(BaseSettings):
     password_reset_retention_days: int = 7
     # 隐私政策 / 用户协议的版本号；写入 consent_records，改版后据此判断是否需要重新获取同意
     legal_document_version: str = "2026-01"
+
+    # 兴趣向量个性化推送
+    # enabled 是总开关：关掉后 /news 直接走原来的随机抽样，不读画像也不做排序
+    interest_profile_enabled: bool = True
+    # 行为时间衰减半衰期（天）：越久远的行为对画像贡献越小。
+    # 取 14 天——技术兴趣的迁移周期大致是「两周换一批关注点」，再长会把旧兴趣拖进来
+    interest_profile_half_life_days: int = 14
+    # 参与构建画像的候选卡片上限（按信号权重取 top-N）
+    # 既是成本闸门（每张要取向量），也避免「早期一次性浏览」长期主导画像
+    interest_profile_max_candidates: int = 200
 
     # Agent Configuration
     max_tokens: int = 4096
