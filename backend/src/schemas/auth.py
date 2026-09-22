@@ -123,11 +123,14 @@ class AccountDeleteRequest(CaptchaFields):
     )
 
 
-class AccountDeleteCancelRequest(BaseModel):
+class AccountDeleteCancelRequest(CaptchaFields):
     """POST /auth/account/delete/cancel 请求体
 
     冷静期内账号 `is_active=false` 无法走正常登录，因此撤销注销用「标识 + 密码」
     直接自证身份，签发的是「撤销操作」而非会话。
+
+    **必须带人机校验字段**：这是一个**匿名可达、以密码为唯一凭证**的端点，
+    与「登录」同属撞库目标。少了 captcha 就等于给爆破留了一条不需要过闸门的旁路。
     """
 
     identifier: str = Field(..., min_length=1, description="邮箱或用户名")

@@ -6,9 +6,12 @@
 1. **一个会话一行**：登录/注册时为每台设备建一行 `user_sessions`，refresh token 的
    `jti` 落在这行上；「撤销某设备」= 把这行置 `revoked_at`。
 2. **refresh 轮换**：每次刷新都换发新 refresh、作废旧行并串成链（`replaced_by_jti`）。
-3. **reuse 检测**：一个**已作废**的 refresh 再次出现，只有两种可能 ——
-   多标签页并发（正常）或 token 被盗（异常）。用「宽限窗 + 替换会话是否仍活跃」
-   区分：窗内且替换会话活跃 → 只补发 access；否则 → 判为盗用，撤销该用户全部会话。
+3. **reuse 检测**：一个**已作废**的 refresh 再次出现，有三种可能 —— 该会话被显式
+   撤销（登出/下线设备/改密，正常）、多标签页并发（正常）、token 被盗（异常）。
+   先按 `replaced_by_jti` 是否为 None 排除「显式撤销」；余下的用「宽限窗 + 替换会话
+   是否仍活跃」区分：窗内且替换会话活跃 → 只补发 access；否则 → 判为盗用，撤销该
+   用户全部会话。**不能把「显式撤销」也当盗用**，否则用户一登出就会收到「账号有
+   登录异常」。
 4. **sid 黑名单**：撤销会话时把 `sid` 写进 Redis（TTL = access 有效期），
    让该会话的 access **立即** 401，而不是等它自然过期（最长 30 分钟）。
 
@@ -198,7 +201,7 @@ def rotate_session(
 
 
 def _handle_reuse(db: OrmSession, user: User, session: UserSession) -> dict:
-    """已作废 refresh 再次出现：区分「并发」与「盗用」"""
+    """已作废 refresh 再次出现：区分「显式撤销」「并发」与「盗用」"""
     now = _now()
     grace = max(0, settings.session_rotate_grace_seconds)
     age = (now - session.revoked_at).total_seconds()
@@ -207,6 +210,22 @@ def _handle_reuse(db: OrmSession, user: User, session: UserSession) -> dict:
         if session.replaced_by_jti
         else None
     )
+
+    if session.replaced_by_jti is None:
+        # 【这一支是「自己登出却被判盗用」的根源】没有 replaced_by_jti，说明这行
+        # 不是被轮换掉的，而是被**显式撤销**的：登出、下线设备、改密、申请注销。
+        # 这类 token 会被合法客户端继续持有 —— 登出响应体与清除 Cookie 之间存在
+        # 竞态，多标签页可能有在途刷新请求，离线重连的客户端还会重放它。
+        # 把这些一律判为盗用并 `revoke_all_sessions`，用户看到的就是
+        # 「我刚登出，却被提示账号有登录异常、全部设备已退出」。
+        # 只有「本该只存在一份的 token 出现了第二份」才是盗用证据，而那种情形
+        # 必然带 replaced_by_jti（见 _rotate）。所以这里按普通凭证失效处理。
+        logger.info(
+            f"显式撤销的 refresh token 再次出现，按凭证失效处理: session={session.id}"
+        )
+        raise ILOException(
+            "TOKEN_INVALID", "登录状态已失效，请重新登录。", status_code=401
+        )
 
     if age <= grace and replacement is not None and replacement.revoked_at is None:
         # 多标签页共享同一 Cookie、几乎同时刷新：正常情形。

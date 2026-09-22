@@ -298,8 +298,19 @@ def load_session(session_id: str) -> Optional[Dict[str, Any]]:
         return None
 
 
-def list_messages(session_id: str, limit: int = 200) -> List[Dict[str, Any]]:
-    """按时间序取会话对话（供「会话历史」接口用）"""
+def list_messages(
+    session_id: str, limit: int = 200, offset: int = 0
+) -> List[Dict[str, Any]]:
+    """按时间序分页取会话对话（供「会话历史」接口用）
+
+    【为什么必须显式分页】此前只有一个内部写死的 200 条上限，超出的对话被
+    **静默丢弃**：详情接口还把截断后的条数当成 message_count 报出去，于是长会话
+    回看时看不出「后面还有」。现在 offset/limit 由调用方给出，总量与是否还有下一页
+    由接口一并返回（见 count_messages），截断不再无声。
+
+    排序用 `created_at, id` 双键：一轮问答的两条消息时间戳可能落在同一微秒，
+    只按时间排会得到不稳定的顺序，翻页时可能出现重复或漏读。
+    """
     if not is_database_configured() or not session_id:
         return []
     try:
@@ -307,8 +318,9 @@ def list_messages(session_id: str, limit: int = 200) -> List[Dict[str, Any]]:
             rows = session.execute(
                 select(ChatMessage)
                 .where(ChatMessage.session_id == session_id)
-                .order_by(ChatMessage.created_at.asc())
-                .limit(limit)
+                .order_by(ChatMessage.created_at.asc(), ChatMessage.id.asc())
+                .offset(max(0, offset))
+                .limit(max(1, limit))
             ).scalars()
             return [
                 {"role": row.role, "content": row.content, "created_at": row.created_at}
@@ -317,6 +329,24 @@ def list_messages(session_id: str, limit: int = 200) -> List[Dict[str, Any]]:
     except Exception as e:  # noqa: BLE001
         logger.warning(f"[WARN] 会话对话读取失败: {session_id} - {e}")
         return []
+
+
+def count_messages(session_id: str) -> int:
+    """单个会话的对话总条数（分页契约的一部分；失败返回 0）"""
+    if not is_database_configured() or not session_id:
+        return 0
+    try:
+        with get_session_factory()() as session:
+            return int(
+                session.execute(
+                    select(func.count(ChatMessage.id)).where(
+                        ChatMessage.session_id == session_id
+                    )
+                ).scalar_one()
+            )
+    except Exception as e:  # noqa: BLE001
+        logger.warning(f"[WARN] 会话对话总数统计失败: {session_id} - {e}")
+        return 0
 
 
 def _session_brief(record: LearningSession) -> Dict[str, Any]:
@@ -437,6 +467,7 @@ __all__ = [
     "SESSION_STATES",
     "append_messages",
     "complete_session_record",
+    "count_messages",
     "count_messages_by_session",
     "get_session",
     "list_messages",

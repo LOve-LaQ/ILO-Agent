@@ -37,6 +37,13 @@ _RULES: dict[str, tuple[str, int]] = {
     "forgot:email": ("forgot_email_rate_limit_per_hour", 3600),
     "captcha:ip": ("captcha_rate_limit_per_hour", 3600),
     "email:resend": ("email_resend_rate_limit_per_hour", 3600),
+    # 成本放大面与凭证校验面：这些端点此前完全没有限流（匿名可触发的抓取、
+    # 裸奔的密码校验旁路），是入口加固里最容易漏掉的一类
+    "discover:refresh:ip": ("discover_refresh_rate_limit_per_hour", 3600),
+    "discover:content:ip": ("card_content_rate_limit_per_hour", 3600),
+    "password:reset:ip": ("password_reset_rate_limit_per_hour", 3600),
+    "learning:chat:ip": ("learning_chat_rate_limit_per_hour", 3600),
+    "account:cancel:ip": ("account_cancel_rate_limit_per_hour", 3600),
 }
 
 
@@ -135,15 +142,25 @@ FORGOT_IP = RateLimitRule("forgot:ip")
 FORGOT_EMAIL = RateLimitRule("forgot:email")
 CAPTCHA_IP = RateLimitRule("captcha:ip")
 EMAIL_RESEND_IP = RateLimitRule("email:resend")
+DISCOVER_REFRESH_IP = RateLimitRule("discover:refresh:ip")
+CARD_CONTENT_IP = RateLimitRule("discover:content:ip")
+PASSWORD_RESET_IP = RateLimitRule("password:reset:ip")
+LEARNING_CHAT_IP = RateLimitRule("learning:chat:ip")
+ACCOUNT_CANCEL_IP = RateLimitRule("account:cancel:ip")
 
 
 __all__ = [
+    "ACCOUNT_CANCEL_IP",
     "CAPTCHA_IP",
+    "CARD_CONTENT_IP",
+    "DISCOVER_REFRESH_IP",
     "EMAIL_RESEND_IP",
     "FORGOT_EMAIL",
     "FORGOT_IP",
+    "LEARNING_CHAT_IP",
     "LOGIN_ACCOUNT",
     "LOGIN_IP",
+    "PASSWORD_RESET_IP",
     "REGISTER_IP",
     "REFRESH_IP",
     "RateLimitRule",

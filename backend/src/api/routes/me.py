@@ -19,7 +19,9 @@
 from typing import Optional
 
 import json
+import re
 from datetime import datetime, timezone
+from urllib.parse import quote
 
 from fastapi import APIRouter, Query, Request, Response, status
 
@@ -53,6 +55,7 @@ from src.services.bookmark_service import (
 )
 from src.services.card_service import find_cards
 from src.services.learning_service import (
+    count_messages,
     count_messages_by_session,
     get_session,
     list_messages,
@@ -198,20 +201,30 @@ async def get_my_sessions(
 
 @router.get("/sessions/{session_id}", response_model=SessionDetailResponse)
 async def get_my_session_detail(
-    session_id: str, user: CurrentUser
+    session_id: str,
+    user: CurrentUser,
+    limit: int = Query(200, ge=1, le=500, description="本页最多返回多少条对话"),
+    offset: int = Query(0, ge=0, description="从第几条对话开始（按时间正序）"),
 ) -> SessionDetailResponse:
-    """学习记录详情：会话进度 + 完整对话历史"""
+    """学习记录详情：会话进度 + 对话历史（分页）
+
+    对话此前固定在 200 条、超出即静默丢弃。现在 limit/offset 由调用方控制，
+    并用 `messages_total` + `has_more` 明确告知是否还有下一页 ——
+    截断要么不给，要给就必须让调用方知道。
+    """
     row = get_session(session_id, user.id)
     if row is None:
         # 不存在与不属于当前用户都返回 404：不泄露「这个 session_id 是否存在」
         raise ILOException("SESSION_NOT_FOUND", "学习记录不存在。", status_code=404)
 
-    messages = list_messages(session_id)
+    messages = list_messages(session_id, limit=limit, offset=offset)
+    total = count_messages(session_id)
     return SessionDetailResponse(
-        session=SessionItem(
-            **row, message_count=len(messages)
-        ),
+        # 与列表接口口径一致：message_count 是总数，不是本页条数
+        session=SessionItem(**row, message_count=total),
         messages=[SessionMessage(**m) for m in messages],
+        messages_total=total,
+        has_more=offset + len(messages) < total,
     )
 
 
@@ -248,6 +261,30 @@ async def get_my_activities(
 
 # 导出是「一次性全量」场景，不像列表页要分页；设一个上限防止超大账号把响应撑爆内存
 _EXPORT_ROW_LIMIT = 5000
+
+# filename 是**响应头**，而 username 是用户可控字段。若把它原样拼进头部：
+#   1. 用户名里的 `"`、`\r`、`\n` 能直接截断/伪造响应头（HTTP 响应头注入）；
+#   2. 中文等非 ASCII 字符会让部分老客户端解析失败甚至丢弃整个文件。
+# 所以只把「白名单内」的 ASCII 字符放进 `filename=`（给老客户端兜底），
+# 真实名字用 RFC 5987 的 `filename*=UTF-8''` 走百分号编码承载。
+_ASCII_FILENAME_UNSAFE = re.compile(r"[^A-Za-z0-9._-]")
+_MAX_FILENAME_BASE = 64
+
+
+def _attachment_disposition(base_name: str, extension: str = ".json") -> str:
+    """安全构造附件下载的 Content-Disposition 头。
+
+    - ASCII 回退名：白名单外的字符一律替换为 `_`，并截断长度，保证头部结构不被破坏
+    - UTF-8 名：先截断再整体百分号编码（`quote` 会把 CR/LF 也编码成 `%0D/%0A`，
+      注入字符被彻底中和），用 `filename*` 承载真实的（可能含中文的）用户名
+    """
+    base_name = (base_name or "").strip()[:_MAX_FILENAME_BASE]
+    ascii_base = _ASCII_FILENAME_UNSAFE.sub("_", base_name).strip("._") or "user"
+    utf8_name = quote(f"{base_name}{extension}", safe="")
+    return (
+        f'attachment; filename="{ascii_base}{extension}"; '
+        f"filename*=UTF-8''{utf8_name}"
+    )
 
 
 @router.get("/export", response_model=DataExportResponse)
@@ -297,9 +334,9 @@ async def export_my_data(request: Request, user: CurrentUser) -> Response:
         request=request,
     )
 
-    filename = f"ilo-export-{user.username}.json"
+    filename = f"ilo-export-{user.username}"
     return Response(
         content=body,
         media_type="application/json",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        headers={"Content-Disposition": _attachment_disposition(filename)},
     )

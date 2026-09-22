@@ -67,9 +67,25 @@ def _crawled_set() -> str:
     return CRAWLED_SET
 
 
+# 与 collection_records.item_id 的列宽（String(64)）严格对齐：
+# 超长 id 写不进真相源，就**绝不能**进 Redis 去重集合 —— 否则下一轮抓取会把它
+# 当成「已采集」跳过，而真相源里根本没有它的记录，这张卡片就被永久跳过了。
+# 「已采集」与「无记录」并存是静默数据丢失，且从表面上完全看不出来。
+MAX_ITEM_ID_LENGTH = 64
+
+
+def _is_recordable_item_id(item_id: str) -> bool:
+    """item_id 是否是真相源存得下的 id（唯一口径，读写两侧共用）"""
+    return bool(item_id) and len(item_id) <= MAX_ITEM_ID_LENGTH
+
+
 def _redis_mark(item_ids: Sequence[str]) -> None:
-    """把已采集的 id 镜像进 Redis（失败只告警：DB 才是真相源）"""
-    ids = [str(i) for i in item_ids if i]
+    """把已采集的 id 镜像进 Redis（失败只告警：DB 才是真相源）
+
+    只写 `_is_recordable_item_id` 认可的 id：与 `record_item` 用**同一个**判定，
+    避免「DB 跳过、Redis 收下」这种两边口径不一致造成的永久漏采。
+    """
+    ids = [str(i) for i in item_ids if _is_recordable_item_id(str(i or ""))]
     if not ids:
         return
     try:
@@ -298,11 +314,13 @@ def record_item(
     item_id = str(item.get("id") or "").strip()
     if not item_id:
         return
-
-    prov = build_provenance(item, status=status)
-    if len(item_id) > 64:
+    # 长度判定与 Redis 侧共用同一个口径（见 _is_recordable_item_id）：
+    # 放不进列宽的 id 一律不落溯源，也不进去重集合，两边必须一致
+    if not _is_recordable_item_id(item_id):
         logger.warning(f"[WARN] item_id 过长，跳过溯源记录: {item_id[:80]}")
         return
+
+    prov = build_provenance(item, status=status)
 
     try:
         with get_session_factory()() as session:
@@ -604,79 +622,97 @@ async def collect_items(
             message="未返回数据，可能触发限流或网络不可达",
         )
 
-    fetched_count = len(items)
-    ids = [str(i.get("id")) for i in items]
-    if force:
-        new_items, skipped_count = list(items), 0
-    else:
-        already = get_collected_ids(ids)
-        new_items = [i for i in items if str(i.get("id")) not in already]
-        skipped_count = fetched_count - len(new_items)
+    # 从这里到 finish_batch 之间任何**未预料**的异常，都会把批次永远留在
+    # running —— 批次只开不关，等于溯源链路里留了一条假的「进行中」，运维看到
+    # 的是一条不推进的记录，而真正的原因已经被异常带走了。fetch 有保护、单条
+    # 入库/富化失败各自兜住、finish_batch 自身也吞异常，所以这里只需再补一道
+    # 兜底：出了意外也要把终态落下去，然后再把异常抛给调用方。
+    try:
+        fetched_count = len(items)
+        ids = [str(i.get("id")) for i in items]
+        if force:
+            new_items, skipped_count = list(items), 0
+        else:
+            already = get_collected_ids(ids)
+            new_items = [i for i in items if str(i.get("id")) not in already]
+            skipped_count = fetched_count - len(new_items)
 
-    if summarize and new_items:
-        new_items = await summarize_items(new_items, kind=kind)
-
-    # 富化放在去重与摘要之后：只为真正要入库的新卡付费，已采集卡片不重复抓
-    if enrich is not None and new_items:
-        try:
-            new_items = await enrich(new_items)
-        except Exception as e:  # noqa: BLE001 - 富化是锦上添花，不该让整批失败
-            logger.warning(f"[WARN] 卡片富化失败（不影响采集）: {e}")
-
-    failed_count = 0
-    for item in new_items:
-        item_id = str(item.get("id") or "")
-        # 不要求摘要时，卡片按原样就是终态
-        finalized = True if not summarize else _summary_applied(item)
-
-        if store is not None:
+        if summarize and new_items:
             try:
-                await store(item)
-            except Exception as e:  # noqa: BLE001 - 单条入库失败不影响整批
+                new_items = await summarize_items(new_items, kind=kind)
+            except Exception as e:  # noqa: BLE001
+                # 摘要链路的整体异常（`_summarize_batch` 之外的意外：模块导入失败、
+                # 客户端构造失败、网络库抛错等）。绝不能让它冒出去 —— 那样批次会
+                # 卡在 running，这批卡片也不会被记为失败，下次抓取还会被当成已处理。
+                # 这里**不改** `summarize`：让下面的循环按 `_summary_applied` 逐条
+                # 判定，已摘要成功的照常入库，没摘要成的记为 failed 等下次重试。
+                logger.error(f"❌ 摘要环节异常({kind})，未摘要成的卡片将记为失败待重试: {e}")
+
+        # 富化放在去重与摘要之后：只为真正要入库的新卡付费，已采集卡片不重复抓
+        if enrich is not None and new_items:
+            try:
+                new_items = await enrich(new_items)
+            except Exception as e:  # noqa: BLE001 - 富化是锦上添花，不该让整批失败
+                logger.warning(f"[WARN] 卡片富化失败（不影响采集）: {e}")
+
+        failed_count = 0
+        for item in new_items:
+            item_id = str(item.get("id") or "")
+            # 不要求摘要时，卡片按原样就是终态
+            finalized = True if not summarize else _summary_applied(item)
+
+            if store is not None:
+                try:
+                    await store(item)
+                except Exception as e:  # noqa: BLE001 - 单条入库失败不影响整批
+                    failed_count += 1
+                    if persist:
+                        record_item(batch_id, item, status="failed")
+                    logger.warning(f"[WARN] 卡片入库失败: {item_id} - {e}")
+                    # 不写 Redis 标记：下次还能重试，避免「永久丢失」被缓存掩盖
+                    continue
+
+            if finalized:
+                if persist:
+                    record_item(batch_id, item, status="summarized")
+                    _redis_mark([item_id])
+            else:
                 failed_count += 1
                 if persist:
                     record_item(batch_id, item, status="failed")
-                logger.warning(f"[WARN] 卡片入库失败: {item_id} - {e}")
-                # 不写 Redis 标记：下次还能重试，避免「永久丢失」被缓存掩盖
-                continue
 
-        if finalized:
-            if persist:
-                record_item(batch_id, item, status="summarized")
-                _redis_mark([item_id])
+        if failed_count == 0:
+            batch_status = "succeeded"
+        elif failed_count < len(new_items):
+            batch_status = "partial"
         else:
-            failed_count += 1
-            if persist:
-                record_item(batch_id, item, status="failed")
+            batch_status = "failed"
 
-    if failed_count == 0:
-        batch_status = "succeeded"
-    elif failed_count < len(new_items):
-        batch_status = "partial"
-    else:
-        batch_status = "failed"
-
-    finish_batch(
-        batch_id,
-        status=batch_status,
-        fetched_count=fetched_count,
-        new_count=len(new_items),
-        skipped_count=skipped_count,
-        failed_count=failed_count,
-    )
-    logger.info(
-        f"✅ 采集完成({kind})：新增 {len(new_items)} 条，跳过 {skipped_count} 条，"
-        f"失败 {failed_count} 条"
-    )
-    return CollectResult(
-        status="ok",
-        kind=kind,
-        batch_id=_sid(batch_id),
-        fetched_count=fetched_count,
-        new_count=len(new_items),
-        skipped_count=skipped_count,
-        failed_count=failed_count,
-    )
+        finish_batch(
+            batch_id,
+            status=batch_status,
+            fetched_count=fetched_count,
+            new_count=len(new_items),
+            skipped_count=skipped_count,
+            failed_count=failed_count,
+        )
+        logger.info(
+            f"✅ 采集完成({kind})：新增 {len(new_items)} 条，跳过 {skipped_count} 条，"
+            f"失败 {failed_count} 条"
+        )
+        return CollectResult(
+            status="ok",
+            kind=kind,
+            batch_id=_sid(batch_id),
+            fetched_count=fetched_count,
+            new_count=len(new_items),
+            skipped_count=skipped_count,
+            failed_count=failed_count,
+        )
+    except Exception as e:  # noqa: BLE001 - 兜底：批次绝不能停在 running
+        logger.error(f"❌ 采集编排异常({kind}): {e}")
+        finish_batch(batch_id, status="failed", error=str(e)[:1000])
+        raise
 
 
 __all__ = [

@@ -93,6 +93,22 @@ export function AccountDeletePage() {
   }
 
   // ===== 撤销注销 =====
+  // 撤销表单需要自己的一份人机校验状态：两个表单是两个独立实例（各自的
+  // useId 容器互不冲突），token 是一次性凭证，绝不能共用一个结果对象。
+  const [cancelCaptchaResult, setCancelCaptchaResult] = useState<CaptchaResult | null>(null);
+  const [cancelCaptchaBlocked, setCancelCaptchaBlocked] = useState(false);
+  const [cancelCaptchaReset, setCancelCaptchaReset] = useState(0);
+  const handleCancelCaptchaVerify = useCallback(
+    (result: CaptchaResult | null) => setCancelCaptchaResult(result),
+    [],
+  );
+  const handleCancelCaptchaUnavailable = useCallback(
+    (unavailable: boolean) => setCancelCaptchaBlocked(unavailable),
+    [],
+  );
+  const cancelCaptchaIncomplete =
+    captchaRequired && (cancelCaptchaBlocked || !cancelCaptchaResult);
+
   const [cancelIdentifier, setCancelIdentifier] = useState('');
   const [cancelPassword, setCancelPassword] = useState('');
   const [cancelError, setCancelError] = useState('');
@@ -106,6 +122,11 @@ export function AccountDeletePage() {
       setCancelError('请输入邮箱/用户名与密码。');
       return;
     }
+    // 与后端「无条件强制人机校验」对齐：拿不到凭证就不该把请求发出去
+    if (cancelCaptchaIncomplete) {
+      setCancelError('请先完成人机校验。');
+      return;
+    }
 
     setCancelSubmitting(true);
     setCancelError('');
@@ -113,11 +134,21 @@ export function AccountDeletePage() {
       const data = await cancelAccountDeletion({
         identifier: cancelIdentifier.trim(),
         password: cancelPassword,
+        captcha_token: captchaRequired ? (cancelCaptchaResult?.token ?? null) : null,
+        captcha_knock: captchaRequired ? (cancelCaptchaResult?.knock ?? null) : null,
+        captcha_dfu: captchaRequired ? (cancelCaptchaResult?.dfu ?? null) : null,
+        captcha_ip: captchaRequired ? (cancelCaptchaResult?.ip ?? null) : null,
       });
       setCancelDone(data.message);
       showToast('已撤销注销申请');
     } catch (cause) {
-      setCancelError(cause instanceof ApiError ? cause.message : '操作失败，请稍后重试。');
+      if (cause instanceof ApiError) {
+        // token 已被服务端消费或过期：清掉本地凭证，要求重新验证
+        if (isCaptchaError(cause.code)) setCancelCaptchaReset((value) => value + 1);
+        setCancelError(cause.message);
+      } else {
+        setCancelError('操作失败，请稍后重试。');
+      }
     } finally {
       setCancelSubmitting(false);
     }
@@ -253,7 +284,20 @@ export function AccountDeletePage() {
             />
           </div>
 
-          <button className={`btn ${styles.submit}`} type="submit" disabled={cancelSubmitting}>
+          {captchaRequired && !cancelDone && (
+            <CaptchaChallenge
+              vid={captcha.data?.vid ?? ''}
+              onVerify={handleCancelCaptchaVerify}
+              onUnavailable={handleCancelCaptchaUnavailable}
+              resetSignal={cancelCaptchaReset}
+            />
+          )}
+
+          <button
+            className={`btn ${styles.submit}`}
+            type="submit"
+            disabled={cancelSubmitting || cancelCaptchaIncomplete}
+          >
             {cancelSubmitting ? '提交中…' : '撤销注销申请'}
           </button>
         </form>

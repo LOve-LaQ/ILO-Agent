@@ -24,7 +24,15 @@ import redis
 import asyncio
 import os
 from qdrant_client import QdrantClient
-from qdrant_client.models import Distance, VectorParams, PointStruct
+from qdrant_client.models import (
+    Distance,
+    FieldCondition,
+    Filter,
+    MatchValue,
+    PointStruct,
+    VectorParams,
+)
+from loguru import logger
 
 
 class MemoryManager:
@@ -205,6 +213,14 @@ class MemoryManager:
         return self._search_similar_users(query_vector, top_k)
 
     def _search_similar_users(self, query_vector: Optional[List[float]], top_k: int) -> List[dict]:
+        """按向量检索相似用户画像。
+
+        【与 _search_similar_learnings 的区别，务必分清】这个方法**天然是跨用户**的
+        （「找相似用户」本身就是跨用户语义），因此不能像学习历史那样按 user_id
+        过滤 —— 但也正因如此，它返回的 `user_id` 与 `preferences` 是**他人数据**，
+        只允许服务于聚合用途（如协同过滤的候选集），**绝不能原样返回给终端用户**。
+        对外暴露前必须脱敏（去掉 user_id、只保留聚合后的画像特征）。
+        """
         if query_vector is None:
             query_vector = [0.2] * 1536
             print("⚠️  Using placeholder vector for user similarity search (emergency fallback)")
@@ -226,17 +242,40 @@ class MemoryManager:
             for point in results.points
         ]
 
-    async def search_similar_learnings_async(self, query_text: str, top_k: int = 5) -> List[dict]:
-        """搜索相似的学习历史（真实向量优先）"""
+    async def search_similar_learnings_async(
+        self, query_text: str, top_k: int = 5, user_id: Optional[str] = None
+    ) -> List[dict]:
+        """搜索相似的学习历史（真实向量优先；强制按 user_id 过滤）"""
         query_vector = await self._embed_async(query_text)
-        return self._search_similar_learnings(query_vector, top_k)
+        return self._search_similar_learnings(query_vector, top_k, user_id=user_id)
 
-    def search_similar_learnings(self, query_text: str, top_k: int = 5) -> List[dict]:
+    def search_similar_learnings(
+        self, query_text: str, top_k: int = 5, user_id: Optional[str] = None
+    ) -> List[dict]:
         """搜索相似的学习历史（同步封装，异步上下文请用 search_similar_learnings_async）"""
         query_vector = self._embed_sync(query_text)
-        return self._search_similar_learnings(query_vector, top_k)
+        return self._search_similar_learnings(query_vector, top_k, user_id=user_id)
 
-    def _search_similar_learnings(self, query_vector: Optional[List[float]], top_k: int) -> List[dict]:
+    def _search_similar_learnings(
+        self, query_vector: Optional[List[float]], top_k: int, user_id: Optional[str] = None
+    ) -> List[dict]:
+        """按向量检索相似的学习历史。
+
+        【必须按 user_id 过滤，且没有「退化成全库」这一说】`learning_history` 是
+        所有用户共用的一个 collection，payload 里带 `user_id`。不带过滤检索就是
+        从全库捞相似记录，会把**别人的**学习主题与摘要当作「与你相关的历史」
+        返回 —— 这是典型的跨用户数据泄露，而且因为向量相似度看起来合理，
+        泄露得非常隐蔽。
+
+        取不到 user_id 时返回空：宁可少一个功能，也不能让检索退化成越权。
+        """
+        owner = user_id or self.user_id
+        if not owner:
+            logger.warning(
+                "[WARN] 缺少 user_id，拒绝执行学习历史的向量检索（避免跨用户泄露）"
+            )
+            return []
+
         if query_vector is None:
             query_vector = [0.4] * 1536
             print("⚠️  Using placeholder vector for learning history search (emergency fallback)")
@@ -247,6 +286,9 @@ class MemoryManager:
             collection_name="learning_history",
             query=query_vector,
             limit=top_k,
+            query_filter=Filter(
+                must=[FieldCondition(key="user_id", match=MatchValue(value=owner))]
+            ),
         )
 
         return [

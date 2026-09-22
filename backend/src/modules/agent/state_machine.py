@@ -16,18 +16,19 @@ import sys
 from dotenv import load_dotenv
 from loguru import logger
 
-# 设置 loguru（解决 Windows 编码问题）
-logger.remove()  # 移除默认处理器
-logger.add(
-    sys.stderr,
-    format="<green>{time:HH:mm:ss}</green> | <level>{level: <8}</level> | {name} - {message}",
-    level="INFO"
-)
-
-# 强制 stdout/stderr 使用 UTF-8 编码
-if sys.platform.startswith('win'):
-    sys.stdout.reconfigure(encoding='utf-8')
-    sys.stderr.reconfigure(encoding='utf-8')
+# 【禁止在此处调用 logger.remove() / logger.add()】
+# 全局日志由 src.core.config.setup_logger() 统一注册（含 request_id 与文件落盘）。
+# 本模块是**惰性导入**的：首次调用 /learning/* 时才会执行到这里。若在模块顶层
+# remove/add，就会在运行期把已注册的 handler 全部顶掉 —— 后果是 logs/app_*.log
+# 停写、log_level 被强制成 INFO、rid 丢失，直接破坏「行为流水 request_id 可与
+# 日志对账」这条可观测性契约。Windows 控制台编码只做防御性收敛，不触碰 handler。
+if sys.platform.startswith("win"):
+    for _stream in (sys.stdout, sys.stderr):
+        try:
+            if (getattr(_stream, "encoding", "") or "").lower() not in ("utf-8", "utf8"):
+                _stream.reconfigure(encoding="utf-8")
+        except (AttributeError, ValueError, OSError):
+            pass
 
 # 加载环境变量
 load_dotenv()
@@ -314,21 +315,42 @@ class QuizFactory:
 
 class FSRSCalculator:
     """FSRS 算法计算器（简化版）"""
-    
+
+    # 四档评分对应的稳定性增长率。1（Again）表示又忘了，稳定性应当**下降**，
+    # 否则「没记住」也会把下次复习推得更远。
+    _RATING_GROWTH = {1: -0.5, 2: 0.2, 3: 1.0, 4: 1.6}
+
+    @staticmethod
+    def next_stability(stability: float, rating: int) -> float:
+        """评分后的新稳定性（天）。这是需要回写到会话上下文的值。
+
+        【为什么必须单独返回】旧实现把「下次间隔天数」当作 stability 存回上下文
+        （`context["fsrs_stability"] = new_interval`），下一次计算又从这个被污染的
+        值出发，于是间隔永远卡在 1 天。稳定性与间隔是两个不同量，必须分开维护。
+        """
+        factor = FSRSCalculator._RATING_GROWTH.get(rating, 1.0)
+        if factor >= 0:
+            new_stability = stability * (1 + 0.1 * factor)
+        else:
+            new_stability = stability * (1 + factor * 0.5)
+        return max(0.5, new_stability)
+
     @staticmethod
     def calculate_next_interval(stability: float, rating: int, desired_retention: float = 0.9) -> int:
-        """计算下次复习间隔（天数）"""
-        rating_weights = {1: 0.0, 2: 0.5, 3: 1.0, 4: 1.5}
-        weight = rating_weights.get(rating, 1.0)
-        
-        new_stability = stability * (1 + 0.1 * weight)
-        
-        if desired_retention < 1.0 and stability > 0:
-            interval = int(-stability * (1 - desired_retention) * 10)
+        """计算下次复习间隔（天数）
+
+        采用 FSRS-4 的间隔公式 `I = S * 9 * (1 / R - 1)`：R=0.9 时系数约为 1，
+        即「间隔 ≈ 稳定性（天）」，R 越高间隔越长。
+
+        旧实现写作 `int(-S * (1 - R) * 10)`：S=1.0、R=0.9 时得 -1，被 `max(1, ...)`
+        兜成 1，配合「把 interval 当 stability 存回」的缺陷，导致复习计划恒为 +1 天。
+        """
+        new_stability = FSRSCalculator.next_stability(stability, rating)
+        if 0 < desired_retention < 1.0:
+            factor = 9.0 * (1.0 / desired_retention - 1.0)
         else:
-            interval = max(1, int(stability * 0.5))
-        
-        return max(1, interval)
+            factor = 1.0
+        return max(1, int(round(new_stability * factor)))
     
     @staticmethod
     def predict_retrievability(stability: float, days_elapsed: float) -> float:
@@ -445,8 +467,9 @@ class LearningStateMachine:
         context["fsrs_rating"] = fsrs_rating
         
         # 计算下次复习间隔
+        current_stability = context.get("fsrs_stability", 1.0)
         new_interval = self.fsrs_calculator.calculate_next_interval(
-            context.get("fsrs_stability", 1.0),
+            current_stability,
             fsrs_rating
         )
         # 「下次复习」必须是未来时刻：此前直接写 datetime.now()，
@@ -458,7 +481,11 @@ class LearningStateMachine:
             ).isoformat()
         }
         
-        context["fsrs_stability"] = review_data["new_interval"]
+        # 回写的是「新的稳定性」而不是「间隔天数」：两者量纲不同，把 interval 当
+        # stability 存，会让下次计算又从被污染的值出发，间隔永远卡在 1 天。
+        context["fsrs_stability"] = self.fsrs_calculator.next_stability(
+            current_stability, fsrs_rating
+        )
         context["next_review_date"] = review_data["next_review_date"]
         
         return {

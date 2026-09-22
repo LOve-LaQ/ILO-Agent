@@ -10,7 +10,7 @@
 - 业务异常统一抛 ILOException，由全局处理器归一为 {code, message, detail}
 """
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Depends, Query, Request
 from typing import List, Dict, Any, Optional
 import json
 import os
@@ -19,6 +19,7 @@ from loguru import logger
 
 from src.api.deps import OptionalUser
 from src.core.errors import ERROR_RESPONSES, ILOException
+from src.core.rate_limit import CARD_CONTENT_IP, DISCOVER_REFRESH_IP, rate_limit
 from src.schemas.discover import (
     CardContentResponse,
     CardListResponse,
@@ -194,15 +195,23 @@ async def get_recommended_news(
     }
 
 
-@router.post("/refresh", response_model=RefreshResponse)
+@router.post(
+    "/refresh",
+    response_model=RefreshResponse,
+    dependencies=[Depends(rate_limit(DISCOVER_REFRESH_IP))],
+)
 async def refresh_news(
-    user: OptionalUser, limit: int = 50, force: bool = False
+    user: OptionalUser,
+    limit: int = Query(50, ge=1, le=100),
+    force: bool = False,
 ) -> Dict[str, Any]:
     """手动触发抓取 GitHub 热门仓库（自动翻页），去重后只对新仓库做摘要，存入知识库
 
     - force=True 时忽略去重，对抓到的仓库全部重新摘要并覆盖写入（用于升级摘要规范/向量）
     - 抓取过程统一走 collection_service：批次、溯源记录、去重真相源都落在 PostgreSQL，
       未登录也允许触发（demo 场景），此时批次不记操作人
+    - limit 限定 1..100：上游翻页上限 10 页 × per_page 100，但单次请求不该任意放大，
+      否则匿名调用方就能用一次请求把外部 API 与 LLM 成本推到上限
     """
     from src.modules.discovery.github_fetcher import GitHubFetcher, attach_readmes
     from src.modules.discovery.tech_knowledge import get_knowledge_base
@@ -316,14 +325,26 @@ async def get_recommended_articles(limit: int = 3) -> Dict[str, Any]:
     }
 
 
-@router.post("/refresh-articles", response_model=RefreshResponse)
+@router.post(
+    "/refresh-articles",
+    response_model=RefreshResponse,
+    dependencies=[Depends(rate_limit(DISCOVER_REFRESH_IP))],
+)
 async def refresh_articles(
-    user: OptionalUser, per_platform: int = 10, time_range: str = "day", force: bool = False
+    user: OptionalUser,
+    # per_platform 与 time_range 都会直接放大下游成本：前者决定每个平台抓多少条、
+    # 进而决定要跑多少次 LLM 摘要，后者决定平台侧的时间窗。匿名即可触发，若不给
+    # 上下界，一个 `per_platform=100000` 就能把抓取配额与 LLM 额度一次性打空。
+    per_platform: int = Query(10, ge=1, le=30),
+    time_range: str = Query("day", pattern="^(day|week|month)$"),
+    force: bool = False,
 ) -> Dict[str, Any]:
     """手动触发抓取多平台热门技术文章，去重后只对新文章做摘要，存入知识库
 
     - force=True 时忽略去重，对抓到的文章全部重新摘要并覆盖写入（用于升级摘要规范/向量）
     - 与 /refresh 共用 collection_service，一次调用 = 一条采集批次 + 每张卡片一条溯源记录
+    - 与 /refresh 共用同一 IP 节流桶：两者都是「触发外抓 + LLM 摘要」的成本放大面，
+      分开配额等于给同一件事开两条通道
     """
     from src.modules.discovery.article_fetcher import ArticleFetcher
     from src.modules.discovery.tech_knowledge import get_knowledge_base
@@ -463,13 +484,19 @@ async def get_card_provenance(card_id: str, request: Request, user: OptionalUser
     }
 
 
-@router.get("/cards/{card_id}/content", response_model=CardContentResponse)
+@router.get(
+    "/cards/{card_id}/content",
+    response_model=CardContentResponse,
+    dependencies=[Depends(rate_limit(CARD_CONTENT_IP))],
+)
 async def get_card_content(card_id: str) -> Dict[str, Any]:
     """读一张卡片的原文（仓库 README）快照，「先读原文」页的数据来源
 
     - 匿名可读：README 本身就是公开内容，读原文不该被登录墙拦住（提问才需要登录）
     - 本地没有快照（存量卡片）时按需补抓一次并回写，之后零延迟
     - 抓不到时返回 `origin=unavailable` 并带上 fallback_description，由前端优雅降级
+    - 之所以仍要限流：命中「需补抓」分支时这里会发起真实的外网请求，
+      card_id 又是路径参数（可任意枚举），不给节流就等于把后端变成匿名可用的代理
     """
     from src.services.collection_service import get_or_fetch_card_content
 

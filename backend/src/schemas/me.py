@@ -110,10 +110,18 @@ class SessionMessage(BaseModel):
 
 
 class SessionDetailResponse(BaseModel):
-    """GET /me/sessions/{session_id} 响应"""
+    """GET /me/sessions/{session_id} 响应
+
+    `messages` 是**分页后的一页**，`messages_total` 才是该会话的对话总数。
+    两者都给出，前端才能区分「对话就这么长」与「还有下一页没取」，
+    而不是把一页的长度当成事实。`session.message_count` 与 `messages_total` 同义，
+    与列表接口的口径一致（都是总数）。
+    """
 
     session: SessionItem
     messages: List[SessionMessage]
+    messages_total: int = Field(..., description="该会话的对话总条数（不受分页影响）")
+    has_more: bool = Field(..., description="是否还有下一页（offset + len(messages) < total）")
 
 
 # ==================== 行为时间线 ====================

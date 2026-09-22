@@ -31,12 +31,13 @@ from src.core.errors import ERROR_RESPONSES, ILOException
 from src.core.net import client_ip, hash_ip, subject_fingerprint
 from src.core.password_policy import check_password
 from src.core.rate_limit import (
-    CAPTCHA_IP,
+    ACCOUNT_CANCEL_IP,
     EMAIL_RESEND_IP,
     FORGOT_EMAIL,
     FORGOT_IP,
     LOGIN_ACCOUNT,
     LOGIN_IP,
+    PASSWORD_RESET_IP,
     REFRESH_IP,
     REGISTER_IP,
     enforce,
@@ -528,7 +529,7 @@ def password_forgot(
 @router.post(
     "/password/reset",
     response_model=SimpleMessageResponse,
-    dependencies=[Depends(rate_limit(CAPTCHA_IP))],
+    dependencies=[Depends(rate_limit(PASSWORD_RESET_IP))],
 )
 def password_reset(
     data: PasswordResetRequest, request: Request, db: DbSession
@@ -549,6 +550,14 @@ def password_reset(
             "RESET_TOKEN_INVALID", "重置链接无效或已过期，请重新申请。", status_code=400
         )
     row, user = resolved
+
+    # 【重复校验一次密码策略，这次带上身份信息】请求体校验只能做「不依赖身份」的
+    # 基础策略（那时还不知道这个 token 属于谁）；拿到 user 之后才能判定
+    # 「新密码是否与自己的用户名/邮箱重合」。与 /password/change 保持一致，
+    # 否则同一个密码在改密入口被拒、在重置入口却能过。
+    reason = check_password(data.new_password, username=user.username, email=user.email)
+    if reason:
+        raise ILOException("WEAK_PASSWORD", reason, status_code=400)
 
     user.password_hash = hash_password(data.new_password)
     row.used_at = _now()
@@ -670,25 +679,70 @@ def account_delete(
     )
 
 
-@router.post("/account/delete/cancel", response_model=SimpleMessageResponse)
+@router.post(
+    "/account/delete/cancel",
+    response_model=SimpleMessageResponse,
+    dependencies=[Depends(rate_limit(ACCOUNT_CANCEL_IP))],
+)
 def account_delete_cancel(
     data: AccountDeleteCancelRequest, request: Request, db: DbSession
 ) -> SimpleMessageResponse:
-    """冷静期内撤销注销申请（账号已停用，故用「标识 + 密码」自证身份）"""
-    user = _resolve_user_by_identifier(db, data.identifier.strip())
-    if user is None or not verify_password(data.password, user.password_hash):
+    """冷静期内撤销注销申请（账号已停用，故用「标识 + 密码」自证身份）
+
+    【为什么这里要按登录同等级别加固】账号停用后拿不到任何会话，本端点只能靠
+    密码自证身份 —— 也就是说它是一条**匿名可达的密码校验入口**。此前它没有任何
+    闸门，攻击者可以拿它当「不触发登录锁定」的撞库旁路。现在补齐四件事：
+    1. IP 限流（路由级）+ 账号维度节流（与登录**共用同一个失败桶**，换 IP 打同一
+       账号一样会被拦，也不会因为换端点而多拿到一份尝试配额）；
+    2. 人机校验（与注册/找回/重置同为强制）；
+    3. 失败计数（与登录共用 `record_failure`），成功后清零；
+    4. 响应不可区分 —— 见下方 INVALID_CREDENTIALS 处的注释。
+    """
+    identifier = data.identifier.strip()
+
+    enforce(LOGIN_ACCOUNT, subject_fingerprint(identifier), message=_LOCKED_MESSAGE)
+    locked, retry_after = is_locked(identifier)
+    if locked:
         raise ILOException(
-            "INVALID_CREDENTIALS", "邮箱/用户名或密码不正确。", status_code=401
+            "RATE_LIMITED",
+            _LOCKED_MESSAGE,
+            status_code=429,
+            headers={"Retry-After": str(retry_after)},
         )
-    if user.deletion_requested_at is None:
+
+    # 无条件要求人机校验：本端点没有会话这道前置闸门，只靠密码，
+    # 不像登录那样「正常用户零打扰」——每个请求都要过。
+    _require_captcha(
+        data.captcha_token,
+        request,
+        event_target="account_delete_cancel",
+        knock=data.captcha_knock,
+        dfu=data.captcha_dfu,
+        ip=data.captcha_ip,
+    )
+
+    user = _resolve_user_by_identifier(db, identifier)
+
+    # 【必须把「密码错」与「没有待处理申请」合并成同一个响应】
+    # 旧实现分开返回 401（凭证错）与 400（无待处理申请），于是「400」本身就等于
+    # 宣告「密码是对的」—— 匿名端点就此变成密码预言机，任何账号的密码都能被离线
+    # 判对错。现在两者共用同一 code / 状态码 / 话术，攻击者无法从响应区分，
+    # 而本人仍能从「成功」与「失败」判断撤销是否生效。
+    credentials_ok = user is not None and verify_password(data.password, user.password_hash)
+    if not credentials_ok or user.deletion_requested_at is None:
+        record_failure(identifier)
         raise ILOException(
-            "NO_DELETION_PENDING", "该账号没有待处理的注销申请。", status_code=400
+            "INVALID_CREDENTIALS",
+            "邮箱/用户名或密码不正确，或该账号当前没有待处理的注销申请。",
+            status_code=401,
         )
 
     user.deletion_requested_at = None
     user.deleted_at = None
     user.is_active = True
     db.commit()
+    # 撤销成功等价于一次成功的身份验证，清掉失败计数，避免历史失败把用户锁死
+    clear_failures(identifier)
     logger.info(f"Account deletion cancelled: id={user.id}")
 
     log_activity(

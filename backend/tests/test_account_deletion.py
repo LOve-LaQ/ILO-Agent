@@ -240,13 +240,30 @@ def test_delete_cancel_restores_account(anonymous_client):
 
 
 def test_cancel_without_pending_is_rejected(anonymous_client):
+    """没有待处理注销申请时，撤销必须被拒 —— 且**不能**与「密码错误」可区分。
+
+    这个端点匿名可达、以密码为唯一凭证。如果「账号是否存在 / 有没有待注销申请」
+    能被单独探测出来，就等于送出一个匿名可用的账号状态预言机。所以两种情况必须
+    返回同一个 code / 状态码 / 话术。
+    """
     registered = _register(anonymous_client)
-    resp = anonymous_client.post(
+    email = registered["user"]["email"]
+
+    no_pending = anonymous_client.post(
         "/api/v1/auth/account/delete/cancel",
-        json={"identifier": registered["user"]["email"], "password": PASSWORD},
+        json={"identifier": email, "password": PASSWORD},
     )
-    assert resp.status_code == 400
-    assert resp.json()["code"] == "NO_DELETION_PENDING"
+    wrong_password = anonymous_client.post(
+        "/api/v1/auth/account/delete/cancel",
+        json={"identifier": email, "password": "Wr0ng-Passw0rd"},
+    )
+
+    assert no_pending.status_code == 401
+    assert no_pending.json()["code"] == "INVALID_CREDENTIALS"
+    # 关键：两种失败响应完全一致，调用方无法据此判断账号状态或密码是否正确
+    assert no_pending.status_code == wrong_password.status_code
+    assert no_pending.json()["code"] == wrong_password.json()["code"]
+    assert no_pending.json()["message"] == wrong_password.json()["message"]
 
 
 # ==================== 冷静期到期 → 匿名化落地 ====================

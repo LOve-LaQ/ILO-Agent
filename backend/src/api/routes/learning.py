@@ -15,16 +15,18 @@
 - 会话/对话/测验/完成统一落 PostgreSQL（真相源），Redis 仅作 TTL 1h 的热缓存
 """
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import os
+import time
 import uuid
 
 from dotenv import load_dotenv
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Depends, Request
 from loguru import logger
 
 from src.api.deps import CurrentUser
 from src.core.errors import ERROR_RESPONSES, ILOException
+from src.core.rate_limit import LEARNING_CHAT_IP, rate_limit
 from src.schemas.learning import (
     ChatRequest,
     ChatResponse,
@@ -85,25 +87,60 @@ def get_state_machine():
 # 记忆管理器（单例，用于会话上下文持久化）
 memory_manager = None
 _memory_manager_ready = False
+# 初始化失败后允许重试的最早时刻（monotonic 秒）。
+# 【为什么必须允许重试】Redis / Qdrant 晚于应用就绪是常态（本机 Docker 尤其如此）。
+# 若一次失败就永久置位「已初始化」，那么即使依赖随后恢复，会话上下文的 Redis
+# 热缓存也会一直失效到下次重启进程 —— 等于把「依赖暂时没起来」放大成「整个进程
+# 生命周期降级」。退避 30s 既让恢复能自愈，又不会每请求都去重连。
+_memory_manager_retry_at = 0.0
+_MEMORY_MANAGER_RETRY_SECONDS = 30.0
+
+# 进程启动时刻：健康检查上报**真实**运行时长（此前写死 "24h"，没有任何信息量）
+_PROCESS_STARTED_AT = datetime.now(timezone.utc)
 
 
 def get_memory_manager():
-    """获取或创建 MemoryManager 实例；Redis/Qdrant 不可用时返回 None（不阻塞主流程）"""
-    global memory_manager, _memory_manager_ready
+    """获取或创建 MemoryManager 实例；Redis/Qdrant 不可用时返回 None（不阻塞主流程）
+
+    失败后按 `_MEMORY_MANAGER_RETRY_SECONDS` 退避重试，依赖恢复后自动自愈。
+    """
+    global memory_manager, _memory_manager_ready, _memory_manager_retry_at
     if _memory_manager_ready:
         return memory_manager
-    _memory_manager_ready = True
+
+    now = time.monotonic()
+    if now < _memory_manager_retry_at:
+        return None
+
     try:
         from src.modules.agent.memory_manager import MemoryManager
         memory_manager = MemoryManager({
             "redis_url": os.getenv("REDIS_URL", "redis://127.0.0.1:6379/0"),
             "qdrant_url": os.getenv("QDRANT_URL", "http://127.0.0.1:6333"),
         })
+        _memory_manager_ready = True
         logger.info("✅ MemoryManager initialized (Redis + Qdrant)")
     except Exception as e:
-        logger.warning(f"[WARN] MemoryManager unavailable, falling back to in-memory: {e}")
         memory_manager = None
+        _memory_manager_retry_at = now + _MEMORY_MANAGER_RETRY_SECONDS
+        logger.warning(
+            f"[WARN] MemoryManager unavailable, falling back to in-memory: {e}"
+            f"（{int(_MEMORY_MANAGER_RETRY_SECONDS)} 秒后重试）"
+        )
     return memory_manager
+
+
+def _format_uptime(delta: timedelta) -> str:
+    """把运行时长格式化成可读字符串（天/时/分）"""
+    seconds = max(0, int(delta.total_seconds()))
+    days, rem = divmod(seconds, 86400)
+    hours, rem = divmod(rem, 3600)
+    minutes, _ = divmod(rem, 60)
+    if days:
+        return f"{days}d {hours}h {minutes}m"
+    if hours:
+        return f"{hours}h {minutes}m"
+    return f"{minutes}m"
 
 
 def _redis_persistable(context: dict) -> dict:
@@ -222,16 +259,23 @@ def _find_news_item(news_item_id: str):
 
 
 def _generate_fallback_response(question: str, context: dict) -> str:
-    """生成降级回答（当 LLM 不可用时）"""
-    if "什么是" in question or "定义" in question:
-        return f"**{context['topic']}** 是一个专注于 {', '.join(context['core_concepts'])} 的技术工具。\n\n它的核心优势在于：**性能提升 10 倍**、更好的类型提示支持和全新的 API 设计。非常适合 Python 数据处理场景。"
-    elif "为什么" in question:
-        return f"选择 **{context['topic']}** 的原因包括：\n\n1. **性能优化**: 解析速度比传统方式快 10 倍\n2. **类型安全**: 内置强大的类型提示支持\n3. **易于维护**: 清晰的 API 设计让代码更易读\n\n这些都是因为它的设计团队考虑了现代 Python 开发的最佳实践。"
-    elif "如何" in question or "怎么" in question:
-        code_example = "from pydantic import BaseModel\n\nclass MyModel(BaseModel):\n    name: str\n    age: int\n\n# 自动验证数据类型\nobj = MyModel(name=\'Alice\', age=30)"
-        return f"使用 **{context['topic']}** 非常简单：\n\n```python\n{code_example}\n```\n\n你可以自定义验证器、配置模型行为，并享受无缝的序列化体验。"
-    else:
-        return f"这是个很好的问题！关于 **{context['topic']}**，它主要关注 {', '.join(context['core_concepts'])}，通过提供现代化的 API 和卓越的性能，成为开发者首选的数据验证工具。"
+    """LLM 不可用时的回答。
+
+    【绝不在降级路径里编造技术内容】旧实现在这里返回一段模板化的「专家回答」：
+    不管问的是什么主题，都会说「**性能提升 10 倍**」「非常适合 Python 数据处理」，
+    并附上与主题无关的 Pydantic 示例代码。那不是降级，那是伪造 —— 用户无法分辨
+    真假，而这套系统的定位是**可溯源**的技术情报与讲解。宁可明确告知不可用，
+    也不能输出看似可信的假内容。
+
+    保留参数签名是为了让调用点不必分支；`context['topic']` 只用于让用户确认
+    系统认对了主题。
+    """
+    topic = context.get("topic") or "当前主题"
+    return (
+        f"抱歉，AI 讲解服务当前不可用，我无法就「{topic}」给出可靠回答。\n\n"
+        "这通常是模型服务未配置或临时故障，请稍后重试；"
+        "历史对话已保存，可在「我的 → 学习记录」中回看。"
+    )
 
 
 @router.post("/session", response_model=SessionCreateResponse)
@@ -338,36 +382,42 @@ async def send_push_notification(
     return result
 
 
-@router.post("/chat", response_model=ChatResponse)
+@router.post(
+    "/chat",
+    response_model=ChatResponse,
+    dependencies=[Depends(rate_limit(LEARNING_CHAT_IP))],
+)
 async def chat_with_ai(request: Request, data: ChatRequest, user: CurrentUser) -> ChatResponse:
     """
     AI 聊天助手 - 基于当前学习内容的问答
 
     ## 请求体
-    - session_id: 会话 ID（可选，缺失时创建临时会话）
+    - session_id: 学习会话 ID（必填）
     - message: 用户问题
-    - conversation_history: 历史对话（可选）
+    - conversation_history: 历史对话（可选，最多 20 条）
+
+    ## 语义契约（与本模块 docstring 对齐）
+    会话上下文按「内存 → Redis → PostgreSQL」三级读取，**读不到即 SESSION_NOT_FOUND**。
+    此前这里会退化成一段硬编码的「当前技术主题」占位上下文并照常作答 —— 接口对外
+    宣称「基于当前学习内容」，实际却拿编造的上下文回答，调用方无从分辨。现在三级
+    都读不到就明确 404，与 /quiz、/complete 等接口的语义一致。
+
+    匿名不可用（`CurrentUser` 依赖）+ IP 限流：每次调用都会真实触发一次 LLM 推理，
+    是明确的外部成本放大面。
     """
     from src.modules.agent.state_machine import llm, LLM_AVAILABLE
 
     session_id = data.session_id
-    user_message = (data.message or "").strip()
+    user_message = data.message.strip()
     history = [{"role": m.role, "content": m.content} for m in data.conversation_history]
 
     if not user_message:
         raise ILOException("MESSAGE_REQUIRED", "请输入你的问题。", status_code=400)
 
-    if not session_id:
-        # 如果没提供 session_id，创建一个临时的
-        session_id = f"chat_{os.urandom(4).hex()}"
-
-    # 从状态机获取当前会话上下文
-    sm = get_state_machine()
-
     # 会话上下文：内存优先，其次 Redis（重启后端 / 刷新页面不丢），
-    # 最后回落 PostgreSQL 真相源，都读不到则退化为通用说明
-    news_context = None
-    session_ctx = sm.active_sessions.get(session_id) if session_id else None
+    # 最后回落 PostgreSQL 真相源
+    sm = get_state_machine()
+    session_ctx = sm.active_sessions.get(session_id)
     if session_ctx is None:
         mm = get_memory_manager()
         if mm is not None:
@@ -377,29 +427,30 @@ async def chat_with_ai(request: Request, data: ChatRequest, user: CurrentUser) -
                 logger.warning(f"[WARN] Failed to load session context from Redis: {e}")
                 session_ctx = None
 
-    if session_ctx is None and session_id:
+    if session_ctx is None:
         # 第三级：Redis 过期后仍能给出「在学什么」的准确上下文。
         # 刻意不排除已完成会话 —— 学完之后继续追问是合理用法。
         session_ctx = load_session(session_id)
         if session_ctx is not None:
             _revive_context(session_ctx)
 
-    if session_ctx:
-        # 权限边界：不允许借用别人的 session_id 提问
-        owner = session_ctx.get("user_id")
-        if owner and owner != str(user.id):
-            raise ILOException("SESSION_FORBIDDEN", "该学习会话不属于当前账号。", status_code=403)
-        news_context = {
-            "topic": session_ctx.get("topic", ""),
-            "summary": session_ctx.get("summary", ""),
-            "core_concepts": session_ctx.get("core_concepts", []),
-        }
-    else:
-        news_context = {
-            "topic": "当前技术主题",
-            "summary": "请在资讯卡片上点击「开始讲解」创建学习会话后再提问，以便获得针对该技术的回答。",
-            "core_concepts": [],
-        }
+    if not session_ctx:
+        raise ILOException(
+            "SESSION_NOT_FOUND",
+            "学习会话不存在或已过期，请重新打开卡片发起讲解。",
+            status_code=404,
+        )
+
+    # 权限边界：不允许借用别人的 session_id 提问
+    owner = session_ctx.get("user_id")
+    if owner and owner != str(user.id):
+        raise ILOException("SESSION_FORBIDDEN", "该学习会话不属于当前账号。", status_code=403)
+
+    news_context = {
+        "topic": session_ctx.get("topic", ""),
+        "summary": session_ctx.get("summary", ""),
+        "core_concepts": session_ctx.get("core_concepts", []),
+    }
 
     # 构建系统提示词
     system_prompt = f"""
@@ -426,13 +477,17 @@ async def chat_with_ai(request: Request, data: ChatRequest, user: CurrentUser) -
     if LLM_AVAILABLE and llm is not None:
         try:
             response = llm.invoke(system_prompt)
-            ai_response = response.content
+            ai_response = (response.content or "").strip()
+            if not ai_response:
+                # 空内容也是失败：若原样返回，前端会渲染出一个空气泡，
+                # 被当成「AI 回答了但没说话」而不是「这轮没答上来」
+                raise ValueError("LLM 返回空内容")
             logger.info(f"✅ LLM generated response for session {session_id}")
         except Exception as llm_error:
             logger.error(f"❌ LLM generation failed: {llm_error}")
             ai_response = _generate_fallback_response(user_message, news_context)
     else:
-        # 降级模式
+        # 模型未配置：明确告知不可用，绝不编造内容（详见该函数的 docstring）
         ai_response = _generate_fallback_response(user_message, news_context)
 
     # 更新对话历史
@@ -442,8 +497,8 @@ async def chat_with_ai(request: Request, data: ChatRequest, user: CurrentUser) -
     ]
 
     # 对话永久留存：Redis 那份 TTL 只有 1h，不落库这段历史就真的没了。
-    # 临时会话（chat_xxx）也照存 —— chat_messages.session_id 无外键，
-    # 正是为了不因为「没有对应学习会话」而丢掉咨询记录。
+    # session_id 现在必定对应一个真实存在的学习会话（见上方 SESSION_NOT_FOUND），
+    # 「临时会话」这条旁路已取消：它既不校验归属，也无法回溯到任何学习内容。
     append_messages(
         session_id,
         [
@@ -609,9 +664,15 @@ async def complete_session(
 # 健康检查（刻意不加登录依赖：监控/探针需要匿名可用，且不暴露任何用户数据）
 @router.get("/health", response_model=LearningHealthResponse)
 async def health_check() -> LearningHealthResponse:
-    """学习模块健康状态"""
+    """学习模块健康状态
+
+    - `uptime` 是**进程真实运行时长**，不是写死的常量。写死 "24h" 唯一的作用是
+      让人误以为探针在工作；
+    - `state_machine_ready` 如实反映「状态机是否已经被拉起来过」。它是惰性初始化
+      的，冷启动后到首次调用学习接口之前为 false 属正常，不代表故障。
+    """
     return LearningHealthResponse(
         status="healthy",
         state_machine_ready=state_machine is not None,
-        uptime="24h",
+        uptime=_format_uptime(datetime.now(timezone.utc) - _PROCESS_STARTED_AT),
     )

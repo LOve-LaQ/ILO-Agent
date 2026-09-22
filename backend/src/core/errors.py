@@ -13,6 +13,7 @@ from fastapi.responses import JSONResponse
 from loguru import logger
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from src.core.context import get_request_id
 from src.schemas.common import ErrorResponse
 
 
@@ -110,8 +111,19 @@ def register_exception_handlers(app: FastAPI) -> None:
 
     @app.exception_handler(Exception)
     async def _unhandled_exception_handler(request: Request, exc: Exception):
+        # 完整异常栈只进日志（logger.exception 会带上 traceback 与 request_id），
+        # 绝不进响应体。
         logger.exception(f"Unhandled exception: {exc}")
+        # 【为什么不回显 str(exc)】未捕获异常的 message 常常夹带内部结构：SQL 片段与
+        # 表名、文件绝对路径、对象/驱动名，甚至连接串。把它交给匿名调用方，等于免费
+        # 提供一份内部实现地图，也为后续更精确的注入探测提供反馈信号。
+        # 排查时不缺这条线索：同一个 request_id 已经进了日志、行为流水与响应头
+        # `x-request-id`，前端把它展示出来，运维直接按 id 检索即可对齐。
+        request_id = get_request_id()
+        message = "服务器内部错误，请稍后重试"
+        if request_id:
+            message = f"{message}（问题编号 {request_id}）"
         return JSONResponse(
             status_code=500,
-            content=_error_payload("INTERNAL_ERROR", "服务器内部错误，请稍后重试", str(exc)),
+            content=_error_payload("INTERNAL_ERROR", message, None),
         )

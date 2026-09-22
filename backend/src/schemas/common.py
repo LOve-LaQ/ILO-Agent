@@ -5,7 +5,7 @@
 - PageMeta: 列表分页元信息
 """
 
-from typing import Any, Optional
+from typing import Any, Dict, Optional
 
 from pydantic import BaseModel, Field
 
@@ -41,3 +41,10 @@ class HealthCheckResponse(BaseModel):
 
     status: str = Field(..., description="健康状态：healthy | degraded")
     service: str = Field(..., description="服务名")
+    checks: Optional[Dict[str, str]] = Field(
+        None,
+        description=(
+            "各依赖探测结果：ok | not_configured | unavailable | http_xxx | error。"
+            "任一非 ok（not_configured 除外）即为 degraded"
+        ),
+    )

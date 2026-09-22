@@ -44,6 +44,8 @@ export interface paths {
          *     - force=True 时忽略去重，对抓到的仓库全部重新摘要并覆盖写入（用于升级摘要规范/向量）
          *     - 抓取过程统一走 collection_service：批次、溯源记录、去重真相源都落在 PostgreSQL，
          *       未登录也允许触发（demo 场景），此时批次不记操作人
+         *     - limit 限定 1..100：上游翻页上限 10 页 × per_page 100，但单次请求不该任意放大，
+         *       否则匿名调用方就能用一次请求把外部 API 与 LLM 成本推到上限
          */
         post: operations["refresh_news_api_v1_discover_refresh_post"];
         delete?: never;
@@ -93,6 +95,8 @@ export interface paths {
          *
          *     - force=True 时忽略去重，对抓到的文章全部重新摘要并覆盖写入（用于升级摘要规范/向量）
          *     - 与 /refresh 共用 collection_service，一次调用 = 一条采集批次 + 每张卡片一条溯源记录
+         *     - 与 /refresh 共用同一 IP 节流桶：两者都是「触发外抓 + LLM 摘要」的成本放大面，
+         *       分开配额等于给同一件事开两条通道
          */
         post: operations["refresh_articles_api_v1_discover_refresh_articles_post"];
         delete?: never;
@@ -185,6 +189,8 @@ export interface paths {
          *     - 匿名可读：README 本身就是公开内容，读原文不该被登录墙拦住（提问才需要登录）
          *     - 本地没有快照（存量卡片）时按需补抓一次并回写，之后零延迟
          *     - 抓不到时返回 `origin=unavailable` 并带上 fallback_description，由前端优雅降级
+         *     - 之所以仍要限流：命中「需补抓」分支时这里会发起真实的外网请求，
+         *       card_id 又是路径参数（可任意枚举），不给节流就等于把后端变成匿名可用的代理
          */
         get: operations["get_card_content_api_v1_discover_cards__card_id__content_get"];
         put?: never;
@@ -390,6 +396,15 @@ export interface paths {
         /**
          * Account Delete Cancel
          * @description 冷静期内撤销注销申请（账号已停用，故用「标识 + 密码」自证身份）
+         *
+         *     【为什么这里要按登录同等级别加固】账号停用后拿不到任何会话，本端点只能靠
+         *     密码自证身份 —— 也就是说它是一条**匿名可达的密码校验入口**。此前它没有任何
+         *     闸门，攻击者可以拿它当「不触发登录锁定」的撞库旁路。现在补齐四件事：
+         *     1. IP 限流（路由级）+ 账号维度节流（与登录**共用同一个失败桶**，换 IP 打同一
+         *        账号一样会被拦，也不会因为换端点而多拿到一份尝试配额）；
+         *     2. 人机校验（与注册/找回/重置同为强制）；
+         *     3. 失败计数（与登录共用 `record_failure`），成功后清零；
+         *     4. 响应不可区分 —— 见下方 INVALID_CREDENTIALS 处的注释。
          */
         post: operations["account_delete_cancel_api_v1_auth_account_delete_cancel_post"];
         delete?: never;
@@ -567,9 +582,18 @@ export interface paths {
          * @description AI 聊天助手 - 基于当前学习内容的问答
          *
          *     ## 请求体
-         *     - session_id: 会话 ID（可选，缺失时创建临时会话）
+         *     - session_id: 学习会话 ID（必填）
          *     - message: 用户问题
-         *     - conversation_history: 历史对话（可选）
+         *     - conversation_history: 历史对话（可选，最多 20 条）
+         *
+         *     ## 语义契约（与本模块 docstring 对齐）
+         *     会话上下文按「内存 → Redis → PostgreSQL」三级读取，**读不到即 SESSION_NOT_FOUND**。
+         *     此前这里会退化成一段硬编码的「当前技术主题」占位上下文并照常作答 —— 接口对外
+         *     宣称「基于当前学习内容」，实际却拿编造的上下文回答，调用方无从分辨。现在三级
+         *     都读不到就明确 404，与 /quiz、/complete 等接口的语义一致。
+         *
+         *     匿名不可用（`CurrentUser` 依赖）+ IP 限流：每次调用都会真实触发一次 LLM 推理，
+         *     是明确的外部成本放大面。
          */
         post: operations["chat_with_ai_api_v1_learning_chat_post"];
         delete?: never;
@@ -659,6 +683,11 @@ export interface paths {
         /**
          * Health Check
          * @description 学习模块健康状态
+         *
+         *     - `uptime` 是**进程真实运行时长**，不是写死的常量。写死 "24h" 唯一的作用是
+         *       让人误以为探针在工作；
+         *     - `state_machine_ready` 如实反映「状态机是否已经被拉起来过」。它是惰性初始化
+         *       的，冷启动后到首次调用学习接口之前为 false 属正常，不代表故障。
          */
         get: operations["health_check_api_v1_learning_health_get"];
         put?: never;
@@ -762,7 +791,11 @@ export interface paths {
         };
         /**
          * Get My Session Detail
-         * @description 学习记录详情：会话进度 + 完整对话历史
+         * @description 学习记录详情：会话进度 + 对话历史（分页）
+         *
+         *     对话此前固定在 200 条、超出即静默丢弃。现在 limit/offset 由调用方控制，
+         *     并用 `messages_total` + `has_more` 明确告知是否还有下一页 ——
+         *     截断要么不给，要给就必须让调用方知道。
          */
         get: operations["get_my_session_detail_api_v1_me_sessions__session_id__get"];
         put?: never;
@@ -842,7 +875,11 @@ export interface paths {
         };
         /**
          * Health Check
-         * @description 健康检查接口
+         * @description 健康检查接口（真实探测依赖，而不是硬编码 healthy）
+         *
+         *     声明为同步函数：FastAPI 会把它丢进线程池执行，避免阻塞事件循环 ——
+         *     探测里的 Redis / PostgreSQL / Qdrant 都是阻塞 IO。
+         *     判定口径：任一依赖不可用即 `degraded`（未配置数据库视为「纯 demo 环境」，不算故障）。
          */
         get: operations["health_check_health_get"];
         put?: never;
@@ -863,8 +900,31 @@ export interface components {
          *
          *     冷静期内账号 `is_active=false` 无法走正常登录，因此撤销注销用「标识 + 密码」
          *     直接自证身份，签发的是「撤销操作」而非会话。
+         *
+         *     **必须带人机校验字段**：这是一个**匿名可达、以密码为唯一凭证**的端点，
+         *     与「登录」同属撞库目标。少了 captcha 就等于给爆破留了一条不需要过闸门的旁路。
          */
         AccountDeleteCancelRequest: {
+            /**
+             * Captcha Token
+             * @description 人机校验 token（服务端强制校验，缺失即拒绝）
+             */
+            captcha_token?: string | null;
+            /**
+             * Captcha Knock
+             * @description VAPTCHA knock（前端 validate() 返回，须原样回传）
+             */
+            captcha_knock?: string | null;
+            /**
+             * Captcha Dfu
+             * @description VAPTCHA dfu（前端 validate() 返回，须原样回传）
+             */
+            captcha_dfu?: string | null;
+            /**
+             * Captcha Ip
+             * @description VAPTCHA 签名所用客户端 IP（前端 validate() 返回，服务端优先采用它验签）
+             */
+            captcha_ip?: string | null;
             /**
              * Identifier
              * @description 邮箱或用户名
@@ -1164,7 +1224,11 @@ export interface components {
         };
         /**
          * ChatMessage
-         * @description 单条对话消息
+         * @description 单条对话消息（请求历史与响应回放共用）
+         *
+         *     只限上限不加下限：这个模型同时用于**响应**里的 `conversation_history`，
+         *     若给 content 设 `min_length=1`，模型偶发返回空串时会把响应序列化变成 500 ——
+         *     输入严格、输出宽松，边界要加在正确的一侧。
          */
         ChatMessage: {
             /**
@@ -1172,19 +1236,35 @@ export interface components {
              * @enum {string}
              */
             role: "user" | "assistant";
-            /** Content */
+            /**
+             * Content
+             * @description 单条消息文本（上限 2000 字符）
+             */
             content: string;
         };
         /**
          * ChatRequest
          * @description POST /learning/chat 请求体
+         *
+         *     `session_id` 必填且必须能被三级链路（内存 → Redis → PostgreSQL）读到：
+         *     这个接口的语义是「基于当前学习内容问答」，没有会话就没有「当前学习内容」，
+         *     此时应当明确失败，而不是拿一段编造的通用上下文糊弄过去。
          */
         ChatRequest: {
-            /** Session Id */
-            session_id?: string | null;
-            /** Message */
+            /**
+             * Session Id
+             * @description 学习会话 ID（必须已存在）
+             */
+            session_id: string;
+            /**
+             * Message
+             * @description 用户提问（上限 2000 字符）
+             */
             message: string;
-            /** Conversation History */
+            /**
+             * Conversation History
+             * @description 历史对话（最多 20 条）。会被拼进系统提示词，故必须封顶
+             */
             conversation_history?: components["schemas"]["ChatMessage"][];
         };
         /**
@@ -1336,6 +1416,13 @@ export interface components {
              * @description 服务名
              */
             service: string;
+            /**
+             * Checks
+             * @description 各依赖探测结果：ok | not_configured | unavailable | http_xxx | error。任一非 ok（not_configured 除外）即为 degraded
+             */
+            checks?: {
+                [key: string]: string;
+            } | null;
         };
         /**
          * LearningHealthResponse
@@ -1899,18 +1986,23 @@ export interface components {
             title?: string | null;
             /** Summary */
             summary?: string | null;
-            /** Core Concepts */
+            /**
+             * Core Concepts
+             * @description 核心概念（最多 20 个）
+             */
             core_concepts?: string[];
             /**
              * Time Budget
+             * @description 本次学习预算（分钟，1-480）
              * @default 15
              */
             time_budget: number;
             /**
              * Preferred Depth
              * @default medium
+             * @enum {string}
              */
-            preferred_depth: string;
+            preferred_depth: "surface" | "medium" | "deep";
         };
         /**
          * SessionCreateResponse
@@ -1926,11 +2018,26 @@ export interface components {
         /**
          * SessionDetailResponse
          * @description GET /me/sessions/{session_id} 响应
+         *
+         *     `messages` 是**分页后的一页**，`messages_total` 才是该会话的对话总数。
+         *     两者都给出，前端才能区分「对话就这么长」与「还有下一页没取」，
+         *     而不是把一页的长度当成事实。`session.message_count` 与 `messages_total` 同义，
+         *     与列表接口的口径一致（都是总数）。
          */
         SessionDetailResponse: {
             session: components["schemas"]["SessionItem"];
             /** Messages */
             messages: components["schemas"]["SessionMessage"][];
+            /**
+             * Messages Total
+             * @description 该会话的对话总条数（不受分页影响）
+             */
+            messages_total: number;
+            /**
+             * Has More
+             * @description 是否还有下一页（offset + len(messages) < total）
+             */
+            has_more: boolean;
         };
         /**
          * SessionItem
@@ -5899,7 +6006,12 @@ export interface operations {
     };
     get_my_session_detail_api_v1_me_sessions__session_id__get: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description 本页最多返回多少条对话 */
+                limit?: number;
+                /** @description 从第几条对话开始（按时间正序） */
+                offset?: number;
+            };
             header?: never;
             path: {
                 session_id: string;

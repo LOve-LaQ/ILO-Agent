@@ -41,6 +41,12 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     environment: str = "development"
 
+    # CORS 允许的来源（逗号分隔的白名单）。
+    # 【为什么不给 "*"】allow_origins=["*"] 与 allow_credentials=True 同时开启是明确的
+    # 纵深防御破口：浏览器规范虽然不会让该组合真正放行，但配置本身已失去意义。
+    # 留空时回退到 frontend_base_url（开发期 vite proxy 走同源，本不需要跨域）。
+    cors_allow_origins: str = ""
+
     # Database（阶段 2 用户体系 / 阶段 3 可追溯链路）
     # 形如 postgresql+psycopg2://<user>:<pwd>@127.0.0.1:5432/ilo_agent
     # 故意不给默认值：未配置时 core/db.py 会抛出可操作的错误，而不是静默连错库。
@@ -70,6 +76,18 @@ class Settings(BaseSettings):
     # 确认邮件重发：注册后提示「邮箱未验证」时用户容易反复点重发，
     # 需要压住，否则等于给 SMTP 配额开了一个自助消耗口
     email_resend_rate_limit_per_hour: int = 3
+    # 手动抓取（/discover/refresh*）：每次都会打外部 API + 付 LLM 摘要成本，
+    # 且匿名可触发 —— 必须限流，否则等于给成本开了一个公开的放大口
+    discover_refresh_rate_limit_per_hour: int = 20
+    # 原文按需补抓（/discover/cards/{id}/content）：匿名可触发一次外部抓取并回写
+    card_content_rate_limit_per_hour: int = 60
+    # 重置密码：独立的 IP 维度配额，不与 captcha 校验共用一个桶（否则互相抢占）
+    password_reset_rate_limit_per_hour: int = 10
+    # 学习问答（/learning/chat）：每轮都真实调用 LLM，是成本最高的常规接口
+    learning_chat_rate_limit_per_hour: int = 60
+    # 撤销注销（/auth/account/delete/cancel）：未登录可调且要校验密码，
+    # 不设防就会变成绕开登录锁定的口令爆破旁路
+    account_cancel_rate_limit_per_hour: int = 10
     login_max_failures: int = 5
     login_lockout_minutes: int = 15
 

@@ -182,9 +182,18 @@ def test_quiz_before_explanation_returns_409(client):
 
 
 def test_missing_message_returns_400_envelope(client):
-    response = client.post("/api/v1/learning/chat", json={"message": "   "})
+    # 空白问题：必须在读取会话上下文之前被拦下
+    session_id = _create_session(client, item_id="blank-msg")
+    response = client.post(
+        "/api/v1/learning/chat", json={"session_id": session_id, "message": "   "}
+    )
     assert response.status_code == 400
     assert response.json()["code"] == "MESSAGE_REQUIRED"
+
+    # session_id 是必填：缺了就在 schema 层被挡（422），
+    # 而不是退化成某个默认/临时会话继续作答
+    missing_session = client.post("/api/v1/learning/chat", json={"message": "hi"})
+    assert missing_session.status_code == 422
 
 
 # ---------------------------------------------------------------- learning 主链路
@@ -283,7 +292,11 @@ def test_root_and_health_contracts(client):
 
     health = client.get("/health")
     assert health.status_code == 200
-    assert set(health.json()) == {"status", "service"}
+    body = health.json()
+    assert set(body) == {"status", "service", "checks"}
+    # 健康检查必须真实探测依赖（而非硬编码 healthy）：checks 要如实列出每个依赖状态
+    assert set(body["checks"]) == {"redis", "postgres", "qdrant"}
+    assert body["status"] in {"healthy", "degraded"}
 
 
 # ---------------------------------------------------------------- 权限边界
