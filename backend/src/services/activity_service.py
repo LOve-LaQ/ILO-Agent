@@ -7,6 +7,7 @@
 3. **request_id 走 contextvars**：与 loguru 日志共用同一个 id，出问题能对上账。
 """
 
+import asyncio
 import uuid
 from typing import Any, Dict, List, Optional, Union
 
@@ -83,6 +84,38 @@ def log_activity(
             session.commit()
     except Exception as e:  # noqa: BLE001 - 埋点必须吞掉所有异常
         logger.warning(f"[WARN] 行为埋点失败（不影响主流程）: {action_type} - {e}")
+
+
+async def log_activity_async(
+    action_type: str,
+    *,
+    user_id: UserId = None,
+    target_type: Optional[str] = None,
+    target_id: Optional[str] = None,
+    metadata: Optional[dict] = None,
+    request: Optional[Request] = None,
+) -> None:
+    """`log_activity` 的异步版本：把同步 DB 写卸载到线程池。
+
+    为什么必须卸载：`log_activity` 内部是同步 SQLAlchemy（`session.add` + `commit`），
+    在 `async def` 路由里直接调用会**阻塞整个事件循环**。埋点是几乎每条路由都要走的一步，
+    一次 DB 往返（或连接池排队）就会拖住所有并发请求 —— 单次只有几毫秒，但它是
+    「每个请求都付」的成本，在并发下直接体现为 P95 劣化。
+
+    为什么不把 `log_activity` 本身改成 async：`auth.py` 的路由是**同步 `def`**，
+    FastAPI 会把它们丢进线程池执行，那里调用同步版是正确的；改成 async 会让同步路由
+    拿到一个未 await 的协程（静默不执行，埋点全丢）。所以保留同步版，另开异步版，
+    由调用方按自己的上下文选择。
+    """
+    await asyncio.to_thread(
+        log_activity,
+        action_type,
+        user_id=user_id,
+        target_type=target_type,
+        target_id=target_id,
+        metadata=metadata,
+        request=request,
+    )
 
 
 def _brief(row: UserActivity) -> Dict[str, Any]:

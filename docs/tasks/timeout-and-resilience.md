@@ -611,7 +611,7 @@ event=circuit_open downstream=llm_chat action=fallback scope=explanation
 
 四类事件（`downstream_timeout` / `downstream_retry*` / `downstream_fallback` / `circuit_open`）均按设计触发 ✅
 
-### 8.4 ⚠️ 复测新发现：`/discover/news` 仍有同步阻塞（本次未修）
+### 8.4 ⚠️ 复测新发现：`/discover/news` 仍有同步阻塞（**已由 Phase 5 修复**，见第九节）
 
 **这是第三方复测发现的、原规格与实施都未覆盖的问题。**
 
@@ -648,3 +648,112 @@ async def get_recommended_news        (api/routes/discover.py:195)
 > **通用教训**：这次修的是「LLM 调用阻塞事件循环」，但同类问题在项目里**不止 LLM 一处**。
 > 只按「LLM 调用点」这个维度去搜，必然会漏掉同步的 DB / 向量库 / 文件 IO。
 > 正确的搜索维度是「**`async def` 函数体内出现了哪些同步 IO 调用**」，而不是「哪些地方调了 LLM」。
+
+---
+
+## 九、Phase 5：async 路由内的同步 IO 全量清理（2026-09-23）
+
+> 起因是 8.4 的发现。原建议只覆盖 `/discover/news` 一处，但落地时先做了一次全量审计，
+> 发现同类问题在三个路由文件里**共 80 处** —— 只修一处而加一条守卫，守卫会立刻在其余
+> 79 处上失败。所以按「守卫必须全绿」的标准做完了全部，而不是留一个带 baseline 的假绿。
+
+### 9.1 范围（80 处，全部修复）
+
+| 文件 | 处数 | 主要同步 IO |
+|---|---|---|
+| `api/routes/discover.py` | 19 | `get_knowledge_base` / `kb.count` / `kb.sample` / `kb.candidate_points` / `build_user_profile` / `get_feed_cache` / `save_feed_cache` / `find_card` / `get_provenance` |
+| `api/routes/learning.py` | 38 | `get_state_machine`（**8s 级惰性 import**）/ `get_memory_manager` / `load_session` / `upsert_session` / `append_messages` / `sync_state_from_context` / `complete_session_record` / `mm.get_session_context` / `mm.delete_session` / `find_card` |
+| `api/routes/me.py` | 23 | `list_sessions` / `list_messages` / `get_session` / `session_stats` / `count_messages*` / 收藏读写 / `list_activities` / `count_activities` |
+
+**刻意未改**：`api/routes/auth.py` 的 11 处 `log_activity`。auth 的路由全是**同步 `def`**，
+FastAPI 会把它们丢进线程池执行，那里调用同步版是正确的；改成 async 反而会让同步路由拿到
+一个未 await 的协程（静默不执行，埋点全丢）。这一点最初被误判为「也要改」，是审计脚本
+只扫 `AsyncFunctionDef` 才把它排除掉的。
+
+### 9.2 三个非机械改动（不是简单套 `to_thread`）
+
+1. **新增 `log_activity_async`**（`services/activity_service.py`）
+   埋点几乎每条路由都要走，单次只有几毫秒，但它是「每个请求都付」的成本。
+   保留同步版给 auth 的同步路由用，另开异步版给 async 路由用 —— 而不是把 `log_activity`
+   本身改成 async（那会打断 auth 的 11 个调用点，且它们不能 await）。
+
+2. **三个惰性单例加锁**（`get_knowledge_base` / `get_state_machine` / `get_memory_manager`）
+   卸载到线程池后，这些单例不再是「事件循环内天然串行」。并发首调会各自看到
+   `_x is None` 并各自构造一次 —— `get_state_machine` 每次构造要付 8s 的 import 成本，
+   `get_knowledge_base` 每次构造要多打一次 Qdrant（`_init_collection`）。
+   改为双重检查 + `threading.Lock`。**这是「把同步调用挪到线程」必然带来的副作用，
+   不做这一步等于把一次阻塞换成了 N 次重复初始化。**
+
+3. **`os.getenv("REDIS_URL"/"QDRANT_URL")` → `settings`**
+   `learning.py` 的 MemoryManager 与 `discover.py` 的 feed 缓存此前绕过 settings 直接读环境变量，
+   且 `discover.py` 那个 Redis 客户端**没有配 `socket_timeout`（等于无限等）** ——
+   正是 2.1 要修的那类问题，只是漏在了这两个角落。现统一走 settings。
+
+### 9.3 顺带的收益
+
+- `refresh_news` / `refresh_articles`：日志与响应原本各查一次 `kb.count()`，现共用一次，
+  **少一次 Qdrant 往返**
+- 聚合统计改用 `asyncio.gather` 并发卸载：`get_my_profile` 3 个查询、`get_my_sessions` 2 个、
+  `get_my_activities` 2 个、`export_my_data` 3 个、`get_card_provenance` 2 个。
+  串行改并发，省掉的是真实的 RTT 之和（不是「看起来更快」）
+
+### 9.4 新增守卫：`tests/test_async_no_blocking_io.py`（12 例）
+
+AST 分析器在 `tests/_async_io_guard.py`。**用 AST 而不是正则**，因为正则必然犯两类错：
+`await kb.upsert(...)` 这类异步调用会被误判，换名的变量会被漏判。
+
+分析器做三件事（都是正则做不到的）：
+
+1. **排除 `await` 的调用与 `gather` 的实参** —— 它们是协程，不阻塞事件循环
+2. **资源污染跟踪** —— `kb = get_knowledge_base()` 之后，`kb.xxx()` 全查。
+   **关键限定：只有 IO 工厂的返回值才传播。** `find_cards(ids)` 也做 IO，但它返回的是
+   数据，`cards.get(id)` 只是查字典。不区分「资源」与「数据」会制造大量误报 ——
+   实测第一版就误报了 `session_ctx.get()` / `counts.get()` / `context.get()` / `random.sample()`。
+   误报比漏报更致命：它会让守卫被当成噪声，然后被关掉。
+3. **本地同步函数传染** —— `_personalized_items()` / `_load_session_context()` 这类
+   「同步 `def`，内部做 IO，被 async 路由直接调用」的写法，是最容易漏的一类。
+   8.4 的原始调用链里就有它，但按「哪些地方调了 LLM」去搜是搜不到的。
+
+**12 例里有 8 例是守卫自检**（证明它能识别违规、也会放过合法写法）。
+一个「永远返回空列表」的守卫同样能让主断言通过 —— 守卫有牙齿才值得信任。
+
+黑名单的完整性也被测试锁住了（`test_guard_covers_every_sync_service_used_by_routes`）。
+这条是在实测中被**两次漏项**（`count_activities` / `list_messages`）逼出来的：
+靠人工维护黑名单一定会漏，所以加了「反查路由实际调用的函数定义」的交叉检查。
+
+### 9.5 运行时验证
+
+探针：把知识库换成「每次调用阻塞 500ms」的假实现，同时在事件循环里跑 10ms 心跳，
+记录心跳的最大超时量。`/discover/news` 会调用下游 2 次，故请求耗时约 1000ms。
+
+| 场景 | 请求耗时 | 事件循环最大卡顿 |
+|---|---|---|
+| 对照组：循环内直接 `time.sleep(0.5)` | 500 ms | **506.0 ms** |
+| 对照：`await asyncio.to_thread(time.sleep, 0.5)`（地板值） | 502 ms | 13.2 ms |
+| 改造后 `/discover/news` 第 1 次 | 1073 ms | **8.9 ms** |
+| 改造后 `/discover/news` 第 2 次 | 1007 ms | **9.9 ms** |
+
+下游干了 1000ms 的活，事件循环只被占住约 **10ms**（即 asyncio 调度粒度），
+且这 1000ms 内事件循环一直在服务其他请求。响应仍为 **HTTP 200**，降级链未受影响。
+
+> 探针本身也踩了一个坑，记录备查：第一版在 `create_task(heartbeat)` 之后**立刻**开始计时，
+> 对照组一上来就同步阻塞，心跳连一次采样都没做上，`max()` 拿到空序列直接抛异常。
+> 若不修而只看「改造后没测出阻塞」，很可能把「探针没工作」误读成「没有阻塞」——
+> 所以最终加了 `await asyncio.sleep(0.05)` 先让心跳跑起来，并补了 `to_thread` 地板值对照。
+
+### 9.6 验收
+
+```
+pytest -q                                     ->  263 passed, 2 deselected
+                                                  （基线 251 + 新增 12，零回归）
+pytest tests/test_async_no_blocking_io.py -q  ->  12 passed
+```
+
+### 9.7 遗留（未在本次处理，如实记录）
+
+- `get_state_machine()` 里的 `{"max_tokens": 4096, "num_questions": 3}` 是硬编码，
+  而 Settings 里有同名配置项从未被读取 —— 看起来是「该接线却忘了接线」而不是「该删的废字段」。
+  正确修法是让这两行读 Settings。属配置接线问题，与 async IO 主题无关，单列。
+- `/discover/refresh` 与 `/refresh-articles` 仍是**单请求内跑完整条抓取 + 摘要链**（可能几分钟）。
+  本次只保证它不阻塞事件循环，未做异步队列化。该改造在 `refresh_news` 的 docstring 里已如实标注，
+  接口立即返回 `batch_id` + 前端轮询的形态尚未实现。

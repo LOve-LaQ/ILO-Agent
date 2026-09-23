@@ -18,6 +18,7 @@
 
 from typing import Optional
 
+import asyncio
 import json
 import re
 from datetime import datetime, timezone
@@ -44,7 +45,11 @@ from src.schemas.me import (
     SessionListResponse,
     SessionMessage,
 )
-from src.services.activity_service import count_activities, list_activities, log_activity
+from src.services.activity_service import (
+    count_activities,
+    list_activities,
+    log_activity_async,
+)
 from src.services.bookmark_service import (
     BookmarkError,
     add_bookmark,
@@ -80,15 +85,20 @@ def _ensure_db_available() -> None:
 @router.get("/profile", response_model=MeProfileResponse)
 async def get_my_profile(user: CurrentUser) -> MeProfileResponse:
     """个人中心概览：账号信息 + 学习/收藏/行为汇总"""
-    stats = session_stats(user.id)
+    # 三条统计都是同步 DB 查询且互不依赖，并发卸载 —— 串行三次往返会白等两个 RTT
+    stats, bookmarks_total, activities_total = await asyncio.gather(
+        asyncio.to_thread(session_stats, user.id),
+        asyncio.to_thread(count_bookmarks, user.id),
+        asyncio.to_thread(count_activities, user.id),
+    )
     return MeProfileResponse(
         user=UserPublic.from_user(user),
         stats=LearningStats(
             sessions_total=stats["sessions_total"],
             sessions_completed=stats["sessions_completed"],
             average_score=stats["average_score"],
-            bookmarks_total=count_bookmarks(user.id),
-            activities_total=count_activities(user.id),
+            bookmarks_total=bookmarks_total,
+            activities_total=activities_total,
         ),
     )
 
@@ -103,8 +113,8 @@ async def get_my_bookmarks(
     offset: int = Query(0, ge=0),
 ) -> BookmarkListResponse:
     """收藏列表：卡片快照顺带返回，前端不必再逐个查卡片"""
-    rows = list_bookmarks(user.id, limit=limit, offset=offset)
-    cards = find_cards([row["item_id"] for row in rows])
+    rows = await asyncio.to_thread(list_bookmarks, user.id, limit=limit, offset=offset)
+    cards = await asyncio.to_thread(find_cards, [row["item_id"] for row in rows])
 
     items = [
         BookmarkItem(
@@ -115,11 +125,12 @@ async def get_my_bookmarks(
         )
         for row in rows
     ]
-    all_ids = sorted(get_bookmarked_ids(user.id))
+    all_ids = sorted(await asyncio.to_thread(get_bookmarked_ids, user.id))
+    total = await asyncio.to_thread(count_bookmarks, user.id)
     return BookmarkListResponse(
         items=items,
         count=len(items),
-        total=count_bookmarks(user.id),
+        total=total,
         item_ids=all_ids,
         # 按「数据库是否配置」判定，而不是「有没有收藏」——
         # 否则一条收藏都没有时会误报 unavailable，前端据此提示「存储不可用」就错怪了环境。
@@ -138,12 +149,12 @@ async def create_bookmark(
     """收藏一张卡片（重复收藏幂等，`changed=false`）"""
     _ensure_db_available()
     try:
-        created = add_bookmark(user.id, item_id)
+        created = await asyncio.to_thread(add_bookmark, user.id, item_id)
     except BookmarkError as e:
         raise ILOException("BOOKMARK_FAILED", str(e), status_code=503)
 
     if created:
-        log_activity(
+        await log_activity_async(
             "bookmark",
             user_id=user.id,
             target_type="card",
@@ -160,12 +171,12 @@ async def delete_bookmark(
     """取消收藏（没收藏过也返回成功，`changed=false`）"""
     _ensure_db_available()
     try:
-        removed = remove_bookmark(user.id, item_id)
+        removed = await asyncio.to_thread(remove_bookmark, user.id, item_id)
     except BookmarkError as e:
         raise ILOException("BOOKMARK_FAILED", str(e), status_code=503)
 
     if removed:
-        log_activity(
+        await log_activity_async(
             "unbookmark",
             user_id=user.id,
             target_type="card",
@@ -186,16 +197,23 @@ async def get_my_sessions(
     state: Optional[str] = Query(None, description="按状态过滤：completed 等"),
 ) -> SessionListResponse:
     """学习记录列表（Redis 过期后依然可回看，因为真相源在 PostgreSQL）"""
-    rows = list_sessions(user.id, limit=limit, offset=offset, state=state)
+    rows = await asyncio.to_thread(
+        list_sessions, user.id, limit=limit, offset=offset, state=state
+    )
+    session_ids = [row["session_id"] for row in rows]
 
-    counts = count_messages_by_session([row["session_id"] for row in rows])
+    # 两条聚合查询都只依赖 rows、互不依赖，并发卸载
+    counts, stats = await asyncio.gather(
+        asyncio.to_thread(count_messages_by_session, session_ids),
+        asyncio.to_thread(session_stats, user.id),
+    )
     items = [
         SessionItem(**row, message_count=counts.get(row["session_id"], 0)) for row in rows
     ]
     return SessionListResponse(
         items=items,
         count=len(items),
-        total=session_stats(user.id)["sessions_total"],
+        total=stats["sessions_total"],
     )
 
 
@@ -212,13 +230,15 @@ async def get_my_session_detail(
     并用 `messages_total` + `has_more` 明确告知是否还有下一页 ——
     截断要么不给，要给就必须让调用方知道。
     """
-    row = get_session(session_id, user.id)
+    row = await asyncio.to_thread(get_session, session_id, user.id)
     if row is None:
         # 不存在与不属于当前用户都返回 404：不泄露「这个 session_id 是否存在」
         raise ILOException("SESSION_NOT_FOUND", "学习记录不存在。", status_code=404)
 
-    messages = list_messages(session_id, limit=limit, offset=offset)
-    total = count_messages(session_id)
+    messages, total = await asyncio.gather(
+        asyncio.to_thread(list_messages, session_id, limit=limit, offset=offset),
+        asyncio.to_thread(count_messages, session_id),
+    )
     return SessionDetailResponse(
         # 与列表接口口径一致：message_count 是总数，不是本页条数
         session=SessionItem(**row, message_count=total),
@@ -248,11 +268,16 @@ async def get_my_activities(
             status_code=400,
         )
 
-    rows = list_activities(user.id, limit=limit, offset=offset, action_type=action_type)
+    rows, total = await asyncio.gather(
+        asyncio.to_thread(
+            list_activities, user.id, limit=limit, offset=offset, action_type=action_type
+        ),
+        asyncio.to_thread(count_activities, user.id),
+    )
     return ActivityListResponse(
         items=[ActivityItem(**row) for row in rows],
         count=len(rows),
-        total=count_activities(user.id),
+        total=total,
     )
 
 
@@ -300,21 +325,28 @@ async def export_my_data(request: Request, user: CurrentUser) -> Response:
 
     profile = UserPublic.from_user(user).model_dump(mode="json")
 
-    bookmarks = list_bookmarks(user.id, limit=_EXPORT_ROW_LIMIT, offset=0)
+    # 三条全量查询互不依赖，并发卸载。导出是「一次性拉全量」，每条上限 5000 行，
+    # 串行会让事件循环在三次查询的总时长里完全无法服务其他请求。
+    bookmarks, session_rows, activities = await asyncio.gather(
+        asyncio.to_thread(list_bookmarks, user.id, limit=_EXPORT_ROW_LIMIT, offset=0),
+        asyncio.to_thread(list_sessions, user.id, limit=_EXPORT_ROW_LIMIT, offset=0),
+        asyncio.to_thread(list_activities, user.id, limit=_EXPORT_ROW_LIMIT, offset=0),
+    )
     bookmark_items = [
         {"item_id": row["item_id"], "created_at": row["created_at"]} for row in bookmarks
     ]
 
+    # 每个会话的对话单独查一次（N+1）。这里保持 N 次查询而不改写成一条 IN 查询：
+    # 导出是低频操作，改查询语义的收益抵不过风险；但每次查询都卸载到线程，
+    # 保证这一串同步查询不会占住事件循环。
     sessions: list[dict] = []
-    for row in list_sessions(user.id, limit=_EXPORT_ROW_LIMIT, offset=0):
+    for row in session_rows:
         sessions.append(
             {
                 **row,
-                "messages": list_messages(row["session_id"]),
+                "messages": await asyncio.to_thread(list_messages, row["session_id"]),
             }
         )
-
-    activities = list_activities(user.id, limit=_EXPORT_ROW_LIMIT, offset=0)
 
     export_payload = {
         "exported_at": datetime.now(timezone.utc).isoformat(),
@@ -326,7 +358,7 @@ async def export_my_data(request: Request, user: CurrentUser) -> Response:
     }
     body = json.dumps(export_payload, ensure_ascii=False, indent=2, default=str)
 
-    log_activity(
+    await log_activity_async(
         "export_data",
         user_id=user.id,
         target_type="user",

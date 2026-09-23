@@ -12,8 +12,8 @@
 
 from fastapi import APIRouter, Depends, Query, Request
 from typing import List, Dict, Any, Optional
+import asyncio
 import json
-import os
 import random
 import redis as redis_lib
 from loguru import logger
@@ -37,7 +37,7 @@ from src.schemas.discover import (
     TaggedNewsResponse,
     TrendingResponse,
 )
-from src.services.activity_service import log_activity
+from src.services.activity_service import log_activity_async
 
 router = APIRouter(prefix="/discover", tags=["Discovery"], responses=ERROR_RESPONSES)
 
@@ -47,11 +47,23 @@ _redis_client = None
 
 
 def get_redis_client():
+    """同步 Redis 客户端（懒加载），用于卡片池缓存。
+
+    必须配 `socket_timeout`：不配等于无限等。Redis 只是卡片池的热缓存，
+    不可达时该降级就得能降下去，而不是把整条链路卡死。
+
+    调用点注意：这是**同步**客户端，在 `async def` 路由里必须用
+    `await asyncio.to_thread(...)` 卸载 —— 直接调会阻塞事件循环。
+    """
     global _redis_client
     if _redis_client is None:
+        # 走 settings 而不是 os.getenv：pydantic-settings 同时覆盖进程环境与 .env 文件，
+        # 优先级也是「进程环境 > .env > 默认值」，是 os.getenv 的超集。
         _redis_client = redis_lib.Redis.from_url(
-            os.getenv("REDIS_URL", "redis://127.0.0.1:6379/0"),
+            settings.redis_url,
             decode_responses=True,
+            socket_timeout=settings.redis_socket_timeout,
+            socket_connect_timeout=settings.redis_socket_timeout,
         )
     return _redis_client
 
@@ -154,10 +166,14 @@ _POOL_FACTOR = 4
 _POOL_MIN = 12
 
 
-def _personalized_items(
+async def _personalized_items(
     kb, user, limit: int, deadline: Optional[float] = None
 ) -> List[Dict[str, Any]]:
     """登录且画像可用时按兴趣相似度取一批卡片；否则返回 []（调用方回退随机）
+
+    是 `async def` 而非同步函数：内部 `build_user_profile`（DB + Redis + Qdrant）
+    与 `candidate_points`（Qdrant scroll）都是同步 IO，必须卸载到线程池。
+    这条链跑在 `/news` 首页接口上，直接调用会阻塞事件循环、放大并发 P95。
 
     为什么要「随机窗口」而不是直接取 top-k：前端「换一批」是同一个 URL（不带 offset）
     重复请求，若每次都返回确定性 top-k，按钮就变成了假动作（内容不变只弹 toast）。
@@ -171,12 +187,15 @@ def _personalized_items(
         from src.services.interest_profile import build_user_profile
         from src.services.recommend import diversify_by_category, rank_candidates
 
-        profile = build_user_profile(user.id, deadline=deadline)
+        profile = await asyncio.to_thread(build_user_profile, user.id, deadline=deadline)
         if profile is None:
             return []  # 新用户 / 无行为 / 知识库不可用：交给随机兜底
 
         pool_size = max(limit * _POOL_FACTOR, _POOL_MIN)
-        pool = rank_candidates(kb.candidate_points(item_type="repo"), profile, pool_size)
+        candidates = await asyncio.to_thread(kb.candidate_points, item_type="repo")
+        # rank_candidates / diversify_by_category 是纯计算（余弦相似度 + 打散），
+        # 不做 IO，留在事件循环里跑即可 —— 全部塞进线程池反而增加调度开销。
+        pool = rank_candidates(candidates, profile, pool_size)
         if len(pool) <= limit:
             return pool
 
@@ -214,11 +233,12 @@ async def get_recommended_news(
     total = 0
     try:
         from src.modules.discovery.tech_knowledge import get_knowledge_base
-        kb = get_knowledge_base()
-        total = kb.count("repo")
-        items = _personalized_items(
+        kb = await asyncio.to_thread(get_knowledge_base)
+        total = await asyncio.to_thread(kb.count, "repo")
+        personalized = await _personalized_items(
             kb, user, limit, deadline=getattr(request.state, "deadline", None)
-        ) or kb.sample(limit, item_type="repo")
+        )
+        items = personalized or await asyncio.to_thread(kb.sample, limit, item_type="repo")
     except Exception as e:
         logger.warning(f"[WARN] 知识库不可用: {e}")
 
@@ -232,7 +252,7 @@ async def get_recommended_news(
         }
 
     # 知识库为空时回退到 Redis 旧缓存
-    pool = get_feed_cache()
+    pool = await asyncio.to_thread(get_feed_cache)
     if pool:
         sample = random.sample(pool, min(limit, len(pool)))
         return {
@@ -285,7 +305,7 @@ async def refresh_news(
     fetcher = GitHubFetcher()
     try:
         try:
-            kb = get_knowledge_base()
+            kb = await asyncio.to_thread(get_knowledge_base)
         except Exception as kb_error:
             # 知识库不可用（Qdrant 未启动）时降级为 Redis 缓存
             logger.warning(f"[WARN] 知识库不可用，降级为 Redis 缓存: {kb_error}")
@@ -315,7 +335,7 @@ async def refresh_news(
         )
 
         if kb is None:
-            save_feed_cache(cached)
+            await asyncio.to_thread(save_feed_cache, cached)
             logger.info(f"✅ 抓取完成（Redis 降级）：{len(cached)} 条")
             return {
                 "status": "ok",
@@ -334,15 +354,17 @@ async def refresh_news(
                 "batch_id": result.batch_id,
             }
 
+        # 只查一次：原来日志和响应各查一次，等于白付一次 Qdrant 往返
+        total_in_kb = await asyncio.to_thread(kb.count, "repo")
         logger.info(
             f"✅ 抓取完成：新增 {result.new_count} 条，跳过 {result.skipped_count} 条，"
-            f"知识库仓库共 {kb.count('repo')} 条"
+            f"知识库仓库共 {total_in_kb} 条"
         )
         return {
             "status": "ok",
             "new_count": result.new_count,
             "skipped_count": result.skipped_count,
-            "total_in_kb": kb.count("repo"),
+            "total_in_kb": total_in_kb,
             "batch_id": result.batch_id,
         }
     except Exception as e:
@@ -365,9 +387,9 @@ async def get_recommended_articles(limit: int = 3) -> Dict[str, Any]:
     """
     try:
         from src.modules.discovery.tech_knowledge import get_knowledge_base
-        kb = get_knowledge_base()
-        items = kb.sample(limit, item_type="article")
-        total = kb.count("article")
+        kb = await asyncio.to_thread(get_knowledge_base)
+        items = await asyncio.to_thread(kb.sample, limit, item_type="article")
+        total = await asyncio.to_thread(kb.count, "article")
         if items:
             return {
                 "items": items,
@@ -417,7 +439,7 @@ async def refresh_articles(
 
     fetcher = ArticleFetcher()
     try:
-        kb = get_knowledge_base()
+        kb = await asyncio.to_thread(get_knowledge_base)
 
         result = await collect_items(
             kind="article",
@@ -437,15 +459,17 @@ async def refresh_articles(
                 "batch_id": result.batch_id,
             }
 
+        # 同 /refresh：日志与响应共用一次查询，少一次 Qdrant 往返
+        total_in_kb = await asyncio.to_thread(kb.count, "article")
         logger.info(
             f"✅ 文章抓取完成：新增 {result.new_count} 条，跳过 {result.skipped_count} 条，"
-            f"知识库文章共 {kb.count('article')} 条"
+            f"知识库文章共 {total_in_kb} 条"
         )
         return {
             "status": "ok",
             "new_count": result.new_count,
             "skipped_count": result.skipped_count,
-            "total_in_kb": kb.count("article"),
+            "total_in_kb": total_in_kb,
             "batch_id": result.batch_id,
         }
     except Exception as e:
@@ -507,8 +531,12 @@ async def get_card_provenance(card_id: str, request: Request, user: OptionalUser
     from src.services.collection_service import get_provenance
     from src.services.card_service import find_card
 
-    record = get_provenance(card_id)
-    card = find_card(card_id)
+    # 两个查询都是同步的（前者打 PostgreSQL，后者会走知识库即网络），
+    # 且互相独立 —— 用 gather 并发卸载，比串行两次 to_thread 少一个 RTT 的等待。
+    record, card = await asyncio.gather(
+        asyncio.to_thread(get_provenance, card_id),
+        asyncio.to_thread(find_card, card_id),
+    )
 
     if record is None and card is None:
         raise ILOException(
@@ -517,7 +545,7 @@ async def get_card_provenance(card_id: str, request: Request, user: OptionalUser
 
     # 行为溯源：只有登录用户才记，匿名浏览不落流水（隐私友好，也避免噪声）
     if user is not None:
-        log_activity(
+        await log_activity_async(
             "view_card",
             user_id=user.id,
             target_type="card",

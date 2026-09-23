@@ -17,7 +17,7 @@
 
 from datetime import datetime, timedelta, timezone
 import asyncio
-import os
+import threading
 import time
 import uuid
 
@@ -48,7 +48,7 @@ from src.schemas.learning import (
     SessionCreateRequest,
     SessionCreateResponse,
 )
-from src.services.activity_service import log_activity
+from src.services.activity_service import log_activity_async
 from src.services.learning_service import (
     append_messages,
     complete_session_record,
@@ -66,25 +66,38 @@ router = APIRouter(prefix="/learning", tags=["Learning"], responses=ERROR_RESPON
 
 # 初始化状态机（单例）
 state_machine = None
+# 见 get_state_machine() 的说明：卸载到线程池后，并发首调需要锁来收敛构造。
+_state_machine_lock = threading.Lock()
 
 
 def get_state_machine():
-    """获取或创建状态机实例
+    """获取或创建状态机实例（线程安全）
 
     延迟导入 src.modules.agent：它会连带拉起 langchain / transformers / torch
     （约 8s），而 /auth、/discover 等启动路径并不需要它。放到函数体内后，只有真正
     调用学习接口时才付出这次导入成本，应用启动不再为它买单。
+
+    ⚠️ **首次调用是一次 8s 级的同步阻塞**（惰性 import + 构造状态机）。
+    调用方必须走 `await _get_state_machine()`（内部 `asyncio.to_thread`），
+    直接调这个函数会把事件循环按住 8 秒 —— 冷启动后第一个学习请求会连
+    /health 一起拖住。
+
+    加锁的原因：卸载到线程池后不再是「事件循环内天然串行」，并发首调会各自看到
+    `state_machine is None` 并各自构造一次（每次都要付 8s 的 import 成本）。
+    双重检查 + 锁把构造收敛成一次。
     """
     global state_machine
     if state_machine is None:
-        from src.modules.agent import LearningStateMachine
+        with _state_machine_lock:
+            if state_machine is None:
+                from src.modules.agent import LearningStateMachine
 
-        config = {
-            "max_tokens": 4096,
-            "num_questions": 3
-        }
-        state_machine = LearningStateMachine(config)
-        logger.info("✅ LearningStateMachine initialized")
+                config = {
+                    "max_tokens": 4096,
+                    "num_questions": 3
+                }
+                state_machine = LearningStateMachine(config)
+                logger.info("✅ LearningStateMachine initialized")
 
     return state_machine
 
@@ -98,6 +111,7 @@ _memory_manager_ready = False
 # 热缓存也会一直失效到下次重启进程 —— 等于把「依赖暂时没起来」放大成「整个进程
 # 生命周期降级」。退避 30s 既让恢复能自愈，又不会每请求都去重连。
 _memory_manager_retry_at = 0.0
+_memory_manager_lock = threading.Lock()
 _MEMORY_MANAGER_RETRY_SECONDS = 30.0
 
 # 进程启动时刻：健康检查上报**真实**运行时长（此前写死 "24h"，没有任何信息量）
@@ -110,29 +124,46 @@ def get_memory_manager():
     失败后按 `_MEMORY_MANAGER_RETRY_SECONDS` 退避重试，依赖恢复后自动自愈。
     """
     global memory_manager, _memory_manager_ready, _memory_manager_retry_at
-    if _memory_manager_ready:
+    # 锁的范围覆盖「检查标记 + 构造 + 记录重试时刻」：卸载到线程池后并发首调会
+    # 同时穿过 `_memory_manager_ready` 检查，各自构造一个 MemoryManager
+    # （每个都连 Redis + Qdrant 并建 collection）。
+    with _memory_manager_lock:
+        if _memory_manager_ready:
+            return memory_manager
+
+        now = time.monotonic()
+        if now < _memory_manager_retry_at:
+            return None
+
+        try:
+            from src.modules.agent.memory_manager import MemoryManager
+            # 走 settings 而不是 os.getenv：pydantic-settings 同时覆盖进程环境与
+            # .env 文件，是 os.getenv 的超集（与 tech_knowledge 的取法保持一致，
+            # 避免同一个 Redis 在两处用不同来源解析出不同地址）。
+            memory_manager = MemoryManager({
+                "redis_url": settings.redis_url,
+                "qdrant_url": settings.qdrant_url,
+            })
+            _memory_manager_ready = True
+            logger.info("✅ MemoryManager initialized (Redis + Qdrant)")
+        except Exception as e:
+            memory_manager = None
+            _memory_manager_retry_at = now + _MEMORY_MANAGER_RETRY_SECONDS
+            logger.warning(
+                f"[WARN] MemoryManager unavailable, falling back to in-memory: {e}"
+                f"（{int(_MEMORY_MANAGER_RETRY_SECONDS)} 秒后重试）"
+            )
         return memory_manager
 
-    now = time.monotonic()
-    if now < _memory_manager_retry_at:
-        return None
 
-    try:
-        from src.modules.agent.memory_manager import MemoryManager
-        memory_manager = MemoryManager({
-            "redis_url": os.getenv("REDIS_URL", "redis://127.0.0.1:6379/0"),
-            "qdrant_url": os.getenv("QDRANT_URL", "http://127.0.0.1:6333"),
-        })
-        _memory_manager_ready = True
-        logger.info("✅ MemoryManager initialized (Redis + Qdrant)")
-    except Exception as e:
-        memory_manager = None
-        _memory_manager_retry_at = now + _MEMORY_MANAGER_RETRY_SECONDS
-        logger.warning(
-            f"[WARN] MemoryManager unavailable, falling back to in-memory: {e}"
-            f"（{int(_MEMORY_MANAGER_RETRY_SECONDS)} 秒后重试）"
-        )
-    return memory_manager
+async def _get_state_machine():
+    """异步获取状态机单例：首次构造含 8s 级惰性 import，必须卸载到线程池。"""
+    return await asyncio.to_thread(get_state_machine)
+
+
+async def _get_memory_manager():
+    """异步获取记忆管理器单例：首次构造会连 Redis + Qdrant。"""
+    return await asyncio.to_thread(get_memory_manager)
 
 
 def _format_uptime(delta: timedelta) -> str:
@@ -172,13 +203,15 @@ def _redis_persistable(context: dict) -> dict:
     }
 
 
-def _cache_session_context(context: dict) -> None:
+async def _cache_session_context(context: dict) -> None:
     """把上下文写回 Redis（best-effort，缓存不可用不影响学习流程）"""
-    mm = get_memory_manager()
+    mm = await _get_memory_manager()
     if mm is None:
         return
     try:
-        mm.save_session_context(context["session_id"], _redis_persistable(context))
+        await asyncio.to_thread(
+            mm.save_session_context, context["session_id"], _redis_persistable(context)
+        )
     except Exception as e:
         logger.warning(f"[WARN] Failed to persist session context: {e}")
 
@@ -196,7 +229,7 @@ def _revive_context(context: dict) -> dict:
     return context
 
 
-def _load_session_context(session_id: str, user_id: str) -> dict:
+async def _load_session_context(session_id: str, user_id: str) -> dict:
     """加载会话上下文：内存优先（含 quiz_questions / start_time），其次 Redis，
     最后回落 PostgreSQL 真相源。
 
@@ -205,18 +238,21 @@ def _load_session_context(session_id: str, user_id: str) -> dict:
 
     权限边界：会话归属者与当前登录用户不一致时抛 FORBIDDEN，
     防止拿到别人的 session_id 就能读到其学习内容。
+
+    是 `async def`：三级读取里后两级（Redis / PostgreSQL）都是同步 IO，
+    必须卸载到线程池。内存那一级是纯字典查找，留在事件循环里。
     """
     if not session_id:
         raise ILOException("SESSION_ID_REQUIRED", "缺少 session_id。", status_code=400)
 
-    sm = get_state_machine()
+    sm = await _get_state_machine()
     ctx = sm.active_sessions.get(session_id)
 
     if ctx is None:
-        mm = get_memory_manager()
+        mm = await _get_memory_manager()
         if mm is not None:
             try:
-                ctx = mm.get_session_context(session_id)
+                ctx = await asyncio.to_thread(mm.get_session_context, session_id)
             except Exception as e:
                 logger.warning(f"[WARN] Failed to load session context from Redis: {e}")
                 ctx = None
@@ -225,7 +261,7 @@ def _load_session_context(session_id: str, user_id: str) -> dict:
 
     if ctx is None:
         # 第三级：PostgreSQL 真相源。Redis 重启 / TTL 到期不再等于「学习记录丢失」。
-        ctx = load_session(session_id)
+        ctx = await asyncio.to_thread(load_session, session_id)
         # 已完成的会话按「不存在」处理：与「完成后清 Redis」保持同一语义，
         # 否则会复活 —— 再次 /complete 返回 200、/quiz 走奇怪的降级分支。
         if ctx is not None and state_value(ctx.get("current_state")) == "completed":
@@ -233,7 +269,7 @@ def _load_session_context(session_id: str, user_id: str) -> dict:
         if ctx is not None:
             _revive_context(ctx)
             # 回填热缓存，让后续请求重新走快速路径
-            _cache_session_context(ctx)
+            await _cache_session_context(ctx)
             logger.info(f"♻️ Session context recovered from PostgreSQL: {session_id}")
 
     if not ctx:
@@ -252,15 +288,17 @@ def _load_session_context(session_id: str, user_id: str) -> dict:
     return ctx
 
 
-def _find_news_item(news_item_id: str):
+async def _find_news_item(news_item_id: str):
     """根据资讯 ID 查找资讯内容（三级降级：内置示例 → 知识库 → 抓取缓存）
 
     实现已收敛到 `src.services.card_service`：收藏列表、卡片溯源都要同一套语义，
     三处各自演化很容易出现「这里查得到、那里查不到」的不一致。
+
+    是 `async def`：降级链的第二级会走知识库（Qdrant 网络查询），是同步 IO。
     """
     from src.services.card_service import find_card
 
-    return find_card(news_item_id)
+    return await asyncio.to_thread(find_card, news_item_id)
 
 
 def _generate_fallback_response(question: str, context: dict) -> str:
@@ -294,10 +332,10 @@ async def create_learning_session(
     - session_id: 唯一会话标识
     - context: 初始上下文信息
     """
-    sm = get_state_machine()
+    sm = await _get_state_machine()
 
     # 根据资讯 ID 查找真实资讯内容；查不到时用请求体兜底字段构造
-    news_item = _find_news_item(data.news_item_id)
+    news_item = await _find_news_item(data.news_item_id)
     if news_item is None:
         news_item = {
             "id": data.news_item_id,
@@ -321,11 +359,12 @@ async def create_learning_session(
     logger.info(f"✅ Session created: {session['session_id']}")
 
     # 持久化会话上下文到 Redis（重启后端 / 刷新页面不丢）
-    _cache_session_context(session)
+    await _cache_session_context(session)
 
     # 落库：PostgreSQL 才是真相源，Redis 只是 TTL 1h 的热缓存。
     # 没有这一步，一小时后就再也答不上「这个用户学过什么、考了多少分」。
-    upsert_session(
+    await asyncio.to_thread(
+        upsert_session,
         session["session_id"],
         user_id=user.id,
         card_id=session.get("news_item_id"),
@@ -338,7 +377,7 @@ async def create_learning_session(
         started_at=session.get("start_time"),
     )
 
-    log_activity(
+    await log_activity_async(
         "start_session",
         user_id=user.id,
         target_type="session",
@@ -367,14 +406,14 @@ async def send_push_notification(
     request: Request, data: PushRequest, user: CurrentUser
 ) -> PushResponse:
     """发送推送通知（基于真实会话上下文）"""
-    sm = get_state_machine()
-    context = _load_session_context(data.session_id, str(user.id))
+    sm = await _get_state_machine()
+    context = await _load_session_context(data.session_id, str(user.id))
 
     result = await sm.push_notification(context)
 
-    sync_state_from_context(context, state=result.get("state"))
+    await asyncio.to_thread(sync_state_from_context, context, state=result.get("state"))
 
-    log_activity(
+    await log_activity_async(
         "push_notification",
         user_id=user.id,
         target_type="session",
@@ -421,13 +460,13 @@ async def chat_with_ai(request: Request, data: ChatRequest, user: CurrentUser) -
 
     # 会话上下文：内存优先，其次 Redis（重启后端 / 刷新页面不丢），
     # 最后回落 PostgreSQL 真相源
-    sm = get_state_machine()
+    sm = await _get_state_machine()
     session_ctx = sm.active_sessions.get(session_id)
     if session_ctx is None:
-        mm = get_memory_manager()
+        mm = await _get_memory_manager()
         if mm is not None:
             try:
-                session_ctx = mm.get_session_context(session_id)
+                session_ctx = await asyncio.to_thread(mm.get_session_context, session_id)
             except Exception as e:
                 logger.warning(f"[WARN] Failed to load session context from Redis: {e}")
                 session_ctx = None
@@ -435,7 +474,7 @@ async def chat_with_ai(request: Request, data: ChatRequest, user: CurrentUser) -
     if session_ctx is None:
         # 第三级：Redis 过期后仍能给出「在学什么」的准确上下文。
         # 刻意不排除已完成会话 —— 学完之后继续追问是合理用法。
-        session_ctx = load_session(session_id)
+        session_ctx = await asyncio.to_thread(load_session, session_id)
         if session_ctx is not None:
             _revive_context(session_ctx)
 
@@ -542,7 +581,8 @@ async def chat_with_ai(request: Request, data: ChatRequest, user: CurrentUser) -
     # 对话永久留存：Redis 那份 TTL 只有 1h，不落库这段历史就真的没了。
     # session_id 现在必定对应一个真实存在的学习会话（见上方 SESSION_NOT_FOUND），
     # 「临时会话」这条旁路已取消：它既不校验归属，也无法回溯到任何学习内容。
-    append_messages(
+    await asyncio.to_thread(
+        append_messages,
         session_id,
         [
             {"role": "user", "content": user_message},
@@ -550,7 +590,7 @@ async def chat_with_ai(request: Request, data: ChatRequest, user: CurrentUser) -
         ],
     )
 
-    log_activity(
+    await log_activity_async(
         "ask_question",
         user_id=user.id,
         target_type="session",
@@ -578,8 +618,8 @@ async def process_user_response(
     - session_id: 会话 ID
     - user_input: 用户输入
     """
-    sm = get_state_machine()
-    context = _load_session_context(data.session_id, str(user.id))
+    sm = await _get_state_machine()
+    context = await _load_session_context(data.session_id, str(user.id))
 
     result = await sm.process_user_response(
         context=context,
@@ -588,9 +628,9 @@ async def process_user_response(
     )
 
     # 这一步可能刚生成 quiz_questions，是整条链路里最需要落库的一次同步
-    sync_state_from_context(context, state=result.get("state"))
+    await asyncio.to_thread(sync_state_from_context, context, state=result.get("state"))
 
-    log_activity(
+    await log_activity_async(
         "process_response",
         user_id=user.id,
         target_type="session",
@@ -615,8 +655,8 @@ async def submit_quiz_answer(
     - session_id: 会话 ID
     - user_answers: 用户答案数组
     """
-    sm = get_state_machine()
-    context = _load_session_context(data.session_id, str(user.id))
+    sm = await _get_state_machine()
+    context = await _load_session_context(data.session_id, str(user.id))
 
     if not context.get("quiz_questions"):
         raise ILOException(
@@ -632,9 +672,9 @@ async def submit_quiz_answer(
 
     # 分数与 FSRS 复习计划落库：这两项是「学习效果」的唯一凭证，
     # 之前只活在 Redis 里，一小时后就查不到了
-    sync_state_from_context(context, state=result.get("state"))
+    await asyncio.to_thread(sync_state_from_context, context, state=result.get("state"))
 
-    log_activity(
+    await log_activity_async(
         "submit_quiz",
         user_id=user.id,
         target_type="session",
@@ -662,8 +702,8 @@ async def complete_session(
     ## 请求体
     - session_id: 会话 ID
     """
-    sm = get_state_machine()
-    context = _load_session_context(data.session_id, str(user.id))
+    sm = await _get_state_machine()
+    context = await _load_session_context(data.session_id, str(user.id))
 
     # 从 Redis 恢复的上下文可能缺 start_time，兜底避免 KeyError
     context.setdefault("start_time", datetime.now(timezone.utc))
@@ -671,14 +711,15 @@ async def complete_session(
     result = await sm.complete_session(context)
 
     # 终态落库（状态 + 最终分数 + 复习计划 + 完成时间）
-    complete_session_record(
+    await asyncio.to_thread(
+        complete_session_record,
         data.session_id,
         quiz_score=context.get("quiz_score"),
         fsrs_rating=context.get("fsrs_rating"),
         next_review_at=context.get("next_review_date"),
     )
 
-    log_activity(
+    await log_activity_async(
         "complete_session",
         user_id=user.id,
         target_type="session",
@@ -693,10 +734,10 @@ async def complete_session(
     # 会话结束后必须同时清掉持久化副本，否则 Redis 里那份会让已结束的会话“复活”：
     # 再次 /complete 会返回 200、/quiz 会走奇怪的降级分支。此处 best-effort，
     # Redis 不可用时不阻塞完成流程。
-    mm = get_memory_manager()
+    mm = await _get_memory_manager()
     if mm is not None:
         try:
-            mm.delete_session(data.session_id)
+            await asyncio.to_thread(mm.delete_session, data.session_id)
         except Exception as e:
             logger.warning(f"[WARN] Failed to purge session context: {e}")
 

@@ -15,6 +15,7 @@
 import hashlib
 import os
 import random
+import threading
 import time
 from typing import List, Dict, Any, Optional
 
@@ -48,12 +49,26 @@ CRAWLED_SET = "crawled:item_ids"
 
 _kb = None
 
+# 单例构造锁：`get_knowledge_base()` 现在会被 `asyncio.to_thread` 从线程池并发调用
+# （路由侧为了不阻塞事件循环而卸载），不再是「事件循环内天然串行」。
+# 没有锁的话，并发首调会各自看到 `_kb is None`，构造出多个实例 ——
+# 每个实例都会跑一次 `_init_collection()`（一次 Qdrant 往返），白付 N 次网络开销，
+# 而且被丢弃的实例各自持有一份连接池。双重检查 + 锁把构造收敛成一次。
+_kb_lock = threading.Lock()
+
 
 def get_knowledge_base():
-    """获取知识库单例"""
+    """获取知识库单例（线程安全）
+
+    注意首次调用会真的发网络请求：`TechKnowledgeBase.__init__` 里
+    `_init_collection()` 会 `get_collections()`（最长 `qdrant_timeout`）。
+    所以路由侧必须用 `asyncio.to_thread` 调用它，别在事件循环里直接调。
+    """
     global _kb
     if _kb is None:
-        _kb = TechKnowledgeBase()
+        with _kb_lock:
+            if _kb is None:
+                _kb = TechKnowledgeBase()
     return _kb
 
 
