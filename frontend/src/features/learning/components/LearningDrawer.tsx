@@ -44,6 +44,7 @@ export function LearningDrawer() {
     startChatting,
     loadDigest,
     showCardPoints,
+    backToReading,
     send,
     close,
     restore,
@@ -219,7 +220,9 @@ export function LearningDrawer() {
                 type="button"
                 onClick={() => void startChatting()}
               >
-                💬 直接提问
+                {/* 已有会话时说「继续」而不是「直接」：从问答态退回来的人不该以为
+                    点下去会重开一次会话、丢掉刚才的对话 */}
+                {sessionId ? '💬 继续提问' : '💬 直接提问'}
               </button>
             </div>
           </div>
@@ -228,18 +231,44 @@ export function LearningDrawer() {
         {state === 'explanation' && (
           <div className={styles.chatBody}>
             <ChatBubble role="assistant" content={explanation} />
-            <button
-              className={clsx('btn', 'btn-primary', styles.startChat)}
-              type="button"
-              onClick={startChatting}
-            >
-              🚀 开始提问
-            </button>
+            {/*
+              回退入口：此前这里只有「开始提问」，进来看完要点就再也回不到原文
+              （用户反馈的正是这一点）。与原文态的 .readActions 对称，两侧都能走。
+            */}
+            <div className={styles.explainActions}>
+              <button className="btn" type="button" onClick={backToReading}>
+                ← 返回原文
+              </button>
+              <button
+                className={clsx('btn', 'btn-primary')}
+                type="button"
+                onClick={() => void startChatting()}
+              >
+                🚀 开始提问
+              </button>
+            </div>
           </div>
         )}
 
         {state === 'chatting' && (
           <div className={styles.chatting}>
+            {/*
+              问答态的回顾入口。没有它，用户在对话里想对照原文只能关掉抽屉 ——
+              而关掉之后抽屉里的一切（会话、对话）都没了，「对照原文再追问」这条
+              最自然的路径就断了。只切视图，不动会话。
+              从服务端恢复的会话没有卡片对象（card 为 null），此时无可回看，整条不渲染。
+            */}
+            {card ? (
+              <div className={styles.chatNav}>
+                <span className={styles.chatNavLabel}>回顾</span>
+                <button className="mini-btn" type="button" onClick={backToReading}>
+                  📄 看原文
+                </button>
+                <button className="mini-btn" type="button" onClick={showCardPoints}>
+                  📌 卡片要点
+                </button>
+              </div>
+            ) : null}
             <div className={styles.chatBody} ref={chatBoxRef}>
               {/*
                 key 不能只用 timestamp：一条 INSERT 落库的 user + assistant 拿到的是

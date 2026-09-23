@@ -81,9 +81,33 @@
   min-height: 0;
 }
 
-.startChat {
-  align-self: center;
+/* 问答态顶部的回顾入口（看原文 / 卡片要点）。
+   三步（原文 → 要点 → 问答）必须能来回走 —— 此前是单向的，
+   进了问答就只能关掉抽屉，而关掉等于丢掉当前会话。 */
+.chatNav {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 18px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+  flex: none;
+}
+
+.chatNavLabel {
+  font-size: 11.5px;
+  color: var(--text-3);
+}
+
+/* 卡片要点态的操作行：与原文态的 .readActions 对称，保证能退回原文 */
+.explainActions {
+  display: flex;
+  gap: 10px;
   margin-top: 4px;
+}
+
+.explainActions > * {
+  flex: 1;
 }
 
 .drawerInput {

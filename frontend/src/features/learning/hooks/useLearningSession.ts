@@ -182,6 +182,23 @@ export function useLearningSession() {
     store.setState('explanation');
   }, []);
 
+  /**
+   * 回到「先读原文」态 —— 让 原文 ⇄ 卡片要点 ⇄ 问答 三步成为闭环。
+   *
+   * 【为什么需要】此前这个状态机是**单向**的：reading → explanation → chatting
+   * 之后没有任何回退路径，用户看完「卡片要点」就再也回不到 README，
+   * 在问答里想对照原文只能关掉抽屉重来（关掉还会丢掉当前会话上下文）。
+   *
+   * 【为什么只切 state】刻意**不动** sessionId / messages / content / digest / readView：
+   * - 会话与对话是用户已经付出的成本，回退一个视图不该把它们清掉 ——
+   *   清掉的话「回看原文再回来接着问」就变成「重开一次会话」，等于惩罚用户点了返回；
+   * - readView 也保留：上次在中文导读页，回来就该还在导读页。
+   * 这也是它与 `startLearning` 的区别：那个是「开始一次新学习」，会重置全部状态。
+   */
+  const backToReading = useCallback(() => {
+    useLearningStore.getState().setState('reading');
+  }, []);
+
   const send = useCallback(async () => {
     const store = useLearningStore.getState();
     const q = store.question.trim();
@@ -287,6 +304,7 @@ export function useLearningSession() {
     startChatting,
     loadDigest,
     showCardPoints,
+    backToReading,
     send,
     close,
     restore,
