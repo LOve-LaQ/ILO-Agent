@@ -186,7 +186,7 @@ class SmtpNotifier(EmailNotifier):
             username=settings.smtp_user or None,
             password=settings.smtp_password or None,
             use_tls=settings.smtp_use_tls,
-            timeout=10,
+            timeout=settings.smtp_timeout,
         )
 
 

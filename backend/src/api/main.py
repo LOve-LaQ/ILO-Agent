@@ -20,7 +20,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from src.core.config import settings, setup_logger
 from src.core.errors import register_exception_handlers
 from src.schemas.common import HealthCheckResponse, ServiceInfoResponse
-from src.api.middleware import RequestContextMiddleware
+from src.api.middleware import DeadlineMiddleware, RequestContextMiddleware
 from src.api.routes.auth import router as auth_router
 from src.api.routes.discover import router as discover_router
 from src.api.routes.learning import router as learning_router
@@ -85,7 +85,10 @@ def _probe_dependencies() -> dict:
         import httpx
 
         # 直接打 Qdrant 的 /healthz，避免拉起知识库单例（那会连带初始化 collection）
-        resp = httpx.get(f"{settings.qdrant_url.rstrip('/')}/healthz", timeout=2.0)
+        resp = httpx.get(
+            f"{settings.qdrant_url.rstrip('/')}/healthz",
+            timeout=settings.qdrant_health_timeout,
+        )
         checks["qdrant"] = "ok" if resp.status_code == 200 else f"http_{resp.status_code}"
     except Exception as e:  # noqa: BLE001
         logger.warning(f"[WARN] 健康检查探测 Qdrant 失败: {e}")
@@ -128,6 +131,9 @@ def create_application() -> FastAPI:
 
     # 后加的在更外层：request_id 需要覆盖所有请求（含 CORS 预检失败的情况）
     app.add_middleware(RequestContextMiddleware)
+    # 请求级超时预算：写 request.state.deadline，供下游 clamp_timeout 取用。
+    # 放在 request_id 之内 —— 预算只对真正会打下游的业务接口有意义。
+    app.add_middleware(DeadlineMiddleware)
     
     # 注册路由
     # 权限边界：/discover 匿名可读；/learning 与 /me 必须登录（见 src/api/deps.py）

@@ -154,7 +154,48 @@ class Settings(BaseSettings):
     # Agent Configuration
     max_tokens: int = 4096
     num_questions: int = 3
-    
+
+    # 下游 LLM 调用超时（秒）
+    # 【为什么必须有】不配时走 openai SDK 默认值（量级为分钟），一次上游挂起就能把
+    # async 路由的 worker 占死；超时的意义是「尽快失败并降级」，不是「等到底」。
+    # 与 create_llm(max_retries=0) 配套使用 —— SDK 自带重试会把下面这些数字乘出好几倍。
+    llm_chat_timeout: float = 50.0      # 对话 / 讲解（用户在等，必须有界）
+    llm_summary_timeout: float = 95.0   # 批量摘要（batch_size=20，天然偏长但仍需有界）
+    llm_judge_timeout: float = 35.0     # eval 裁判（仅 pytest -m eval 使用）
+
+    # 请求级超时预算（秒）：从入口往下传，约束「这一次请求总共能花多久」。
+    # 【为什么需要】每层各拍一个固定值在链路一长就失效：Redis 1s + PG 3s +
+    # LLM 50s = 最坏 54s，而且这是没算重试的数字。有预算后重试也受同一约束。
+    # 配 0 或负数表示该接口不设预算（便于排查时临时放行）。
+    deadline_discover_news_seconds: float = 5.0      # 只读缓存 + 向量排序
+    deadline_card_digest_seconds: float = 40.0       # 含一次 LLM 导读生成
+    deadline_learning_chat_seconds: float = 60.0     # LLM 50s + 余量
+    deadline_learning_session_seconds: float = 15.0  # 只建会话，不该调 LLM
+    deadline_learning_response_seconds: float = 60.0  # 含讲解 LLM 调用
+
+    # 下游熔断（超时与韧性）
+    # 连续失败达阈值 → 熔断：开放期内不再发起调用，避免每个请求都去撞一次已挂的下游。
+    # 【为什么状态放 Redis】多实例部署时进程内变量会让每个实例各自熔断、各自半开，
+    # 等于没有熔断 —— 下游已经挂了，实例 B 仍在每个请求上各等一个超时。
+    # Redis 不可用时按「不熔断」处理：保护机制自身故障不该阻断主流程。
+    # 配 0 或负数表示该下游不熔断，便于排查时临时放行。
+    circuit_failure_threshold: int = 5   # 连续失败次数阈值
+    circuit_open_seconds: int = 30       # 熔断开放期（秒）；到期进入半开，只放行 1 个探测
+
+    # 各下游单次调用超时（秒）—— 对应任务书 2.1 超时预算表。
+    # 【为什么要从字面量提成配置项】散在各模块里的 30 / 20 / 10 无法按环境调整：
+    # Redis 挪到同机房可以把 1s 收到 0.3s，外网抓取遇到慢站点又可能要临时放宽。
+    # 硬编码等于把「调参」变成「改代码 + 发版」，现场救火时根本来不及。
+    redis_socket_timeout: float = 1.0        # connect 与 read 共用（Redis 是热缓存，宁可快速降级）
+    db_statement_timeout_ms: int = 3000      # PostgreSQL 语句级上限（真相源，慢了就该报错）
+    qdrant_timeout: float = 4.0              # 向量读取
+    qdrant_write_timeout: float = 6.0        # 向量写入：写被掐断要重采，比读慢更贵
+    qdrant_health_timeout: float = 2.0       # /health 的存活探测，要更快失败
+    embedding_timeout: float = 20.0          # 从 30s 收紧
+    fetch_timeout: float = 25.0              # 外网抓取，从 30s 收紧
+    captcha_timeout: float = 5.0             # 人机校验（保持）
+    smtp_timeout: float = 10.0               # 发信（保持）
+
     # Rate Limiting
     request_rate_limit: int = 100  # requests per minute
     

@@ -10,13 +10,23 @@ import asyncio
 import base64
 import json
 import re
+import time
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 from urllib.parse import urlparse
 
 import httpx
+from loguru import logger
 
+from src.core import circuit_breaker
 from src.core.config import settings
+from src.core.resilience import (
+    log_downstream_failure,
+    RETRY_ON_NETWORK,
+    is_retryable,
+    raise_if_transient,
+    with_retry,
+)
 
 GITHUB_SEARCH_URL = "https://api.github.com/search/repositories"
 GITHUB_README_URL = "https://api.github.com/repos/{full_name}/readme"
@@ -63,7 +73,9 @@ class GitHubFetcher:
     """GitHub 热门仓库抓取器"""
 
     def __init__(self):
-        self.httpx_client = httpx.AsyncClient(timeout=30, headers=_github_headers())
+        self.httpx_client = httpx.AsyncClient(
+            timeout=settings.fetch_timeout, headers=_github_headers()
+        )
 
     async def fetch_trending_repos(self, limit: int = 50, since_days: int = 7) -> List[Dict[str, Any]]:
         """抓取近 N 天创建、按 star 排序的热门仓库（自动翻页，per_page 上限 100）"""
@@ -80,7 +92,24 @@ class GitHubFetcher:
                 "per_page": 100,
                 "page": page,
             }
-            resp = await self.httpx_client.get(GITHUB_SEARCH_URL, params=params)
+            async def _fetch_page(_params=params):
+                r = await self.httpx_client.get(GITHUB_SEARCH_URL, params=_params)
+                # 这里是「非 200 就 break」而不是 raise_for_status：不显式把 429/5xx
+                # 转成异常的话，重试层永远看不到它们，「HTTP 5xx 可重试」会静默失效。
+                raise_if_transient(r)
+                return r
+
+            try:
+                resp = await with_retry(
+                    _fetch_page,
+                    attempts=2,
+                    base_delay=1.0,
+                    should_retry=is_retryable,
+                    label="github_search",
+                )
+            except Exception as exc:  # noqa: BLE001 - 重试耗尽后保持原有「停止翻页」语义
+                print(f"[WARN] GitHub Search API 重试后仍失败({type(exc).__name__})，停止翻页")
+                break
             if resp.status_code != 200:
                 print(f"[WARN] GitHub Search API 返回 {resp.status_code}，停止翻页")
                 break
@@ -126,8 +155,16 @@ def _truncate_readme(text: str) -> tuple:
 
 async def _readme_via_api(full_name: str, client: httpx.AsyncClient) -> Optional[Dict[str, Any]]:
     """官方 API：能拿到权威的 path 与 blob sha（溯源强度最高）"""
-    resp = await client.get(
-        GITHUB_README_URL.format(full_name=full_name), headers=_github_headers()
+    # README 走官方 API，最容易撞上限流与 5xx。失败本来就会降级到 raw CDN，
+    # 但先重试一次能省掉一次不必要的降级（降级会丢掉 blob sha）。
+    resp = await with_retry(
+        lambda: client.get(
+            GITHUB_README_URL.format(full_name=full_name), headers=_github_headers()
+        ),
+        attempts=2,
+        base_delay=1.0,
+        retry_on=RETRY_ON_NETWORK,
+        label="github_readme",
     )
     if resp.status_code != 200:
         return None
@@ -199,7 +236,9 @@ async def fetch_readme(full_name: str, client: httpx.AsyncClient) -> Optional[Di
 
 async def fetch_readme_standalone(full_name: str) -> Optional[Dict[str, Any]]:
     """自建客户端的 README 抓取：按需补抓路径不需要持有 GitHubFetcher 实例"""
-    async with httpx.AsyncClient(timeout=30, headers=_github_headers()) as client:
+    async with httpx.AsyncClient(
+        timeout=settings.fetch_timeout, headers=_github_headers()
+    ) as client:
         return await fetch_readme(full_name, client)
 
 
@@ -223,7 +262,9 @@ async def attach_readmes(items: List[Dict[str, Any]], concurrency: int = 4) -> L
 
     semaphore = asyncio.Semaphore(max(1, concurrency))
 
-    async with httpx.AsyncClient(timeout=30, headers=_github_headers()) as client:
+    async with httpx.AsyncClient(
+        timeout=settings.fetch_timeout, headers=_github_headers()
+    ) as client:
 
         async def _enrich(item: Dict[str, Any]) -> None:
             full_name = repo_full_name(item.get("source_url") or item.get("link"))
@@ -286,14 +327,40 @@ async def _summarize_batch(batch: List[Dict[str, Any]], kind: str) -> List[Dict[
     from src.modules.discovery.summary_spec import build_summary_prompt
 
     prompt = build_summary_prompt(batch, kind=kind)
-    try:
-        result = await asyncio.to_thread(summary_llm.invoke, prompt)
-    except Exception as exc:
-        print(f"[WARN] LLM 调用失败: {exc}")
+
+    # 熔断打开：下游已连续失败，这一批直接放弃，不再去撞一次
+    if circuit_breaker.is_open(circuit_breaker.LLM_SUMMARY):
+        logger.warning(
+            "event=circuit_open downstream=llm_summary action=skip "
+            "scope=github_summary"
+        )
         return []
+
+    _started = time.monotonic()
+    try:
+        # timeout 按次传入：客户端默认值只作兜底。批量摘要一批 20 条、输出结构化
+        # JSON，天然偏长，所以走 summary 档位而不是 chat 档位。
+        result = await asyncio.to_thread(
+            summary_llm.invoke, prompt, timeout=settings.llm_summary_timeout
+        )
+    except Exception as exc:
+        circuit_breaker.record_failure(circuit_breaker.LLM_SUMMARY)
+        log_downstream_failure(
+            downstream="llm_summary",
+            exc=exc,
+            elapsed_ms=(time.monotonic() - _started) * 1000,
+            timeout_s=settings.llm_summary_timeout,
+            scope="github_summary",
+        )
+        return []
+    circuit_breaker.record_success(circuit_breaker.LLM_SUMMARY)
     parsed = _extract_json(result.content)
     if not parsed:
-        print(f"[WARN] JSON 解析失败，输出前 120 字符: {(result.content or '')[:120]!r}")
+        logger.warning(
+            "event=downstream_fallback downstream=llm_summary "
+            "reason=unparsable_output scope=github_summary head={!r}",
+            (result.content or "")[:120],
+        )
         return []
     return parsed
 

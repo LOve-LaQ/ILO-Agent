@@ -154,7 +154,9 @@ _POOL_FACTOR = 4
 _POOL_MIN = 12
 
 
-def _personalized_items(kb, user, limit: int) -> List[Dict[str, Any]]:
+def _personalized_items(
+    kb, user, limit: int, deadline: Optional[float] = None
+) -> List[Dict[str, Any]]:
     """登录且画像可用时按兴趣相似度取一批卡片；否则返回 []（调用方回退随机）
 
     为什么要「随机窗口」而不是直接取 top-k：前端「换一批」是同一个 URL（不带 offset）
@@ -169,7 +171,7 @@ def _personalized_items(kb, user, limit: int) -> List[Dict[str, Any]]:
         from src.services.interest_profile import build_user_profile
         from src.services.recommend import diversify_by_category, rank_candidates
 
-        profile = build_user_profile(user.id)
+        profile = build_user_profile(user.id, deadline=deadline)
         if profile is None:
             return []  # 新用户 / 无行为 / 知识库不可用：交给随机兜底
 
@@ -191,6 +193,7 @@ def _personalized_items(kb, user, limit: int) -> List[Dict[str, Any]]:
     dependencies=[Depends(rate_limit(NEWS_IP))],
 )
 async def get_recommended_news(
+    request: Request,
     user: OptionalUser,
     limit: int = 3,
     offset: int = 0
@@ -213,7 +216,9 @@ async def get_recommended_news(
         from src.modules.discovery.tech_knowledge import get_knowledge_base
         kb = get_knowledge_base()
         total = kb.count("repo")
-        items = _personalized_items(kb, user, limit) or kb.sample(limit, item_type="repo")
+        items = _personalized_items(
+            kb, user, limit, deadline=getattr(request.state, "deadline", None)
+        ) or kb.sample(limit, item_type="repo")
     except Exception as e:
         logger.warning(f"[WARN] 知识库不可用: {e}")
 
@@ -266,6 +271,12 @@ async def refresh_news(
       未登录也允许触发（demo 场景），此时批次不记操作人
     - limit 限定 1..100：上游翻页上限 10 页 × per_page 100，但单次请求不该任意放大，
       否则匿名调用方就能用一次请求把外部 API 与 LLM 成本推到上限
+
+    【当前为同步执行，长任务应改为异步队列】抓取 + 多批摘要整条链路在一次请求内
+    跑完，单次可能耗时几分钟。**不要**靠把超时设大来「解决」——那只是把问题推给
+    网关和用户。正确方向是异步化（接口立即返回 batch_id，前端轮询批次状态）；
+    本项目已有 collection_service 的批次表，状态机已具备，只需把执行挪到后台。
+    本任务未实施该改造，此处如实标注，避免后续维护者误以为这是最终形态。
     """
     from src.modules.discovery.github_fetcher import GitHubFetcher, attach_readmes
     from src.modules.discovery.tech_knowledge import get_knowledge_base

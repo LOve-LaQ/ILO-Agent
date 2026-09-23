@@ -16,6 +16,9 @@ from typing import List, Dict, Any
 
 import httpx
 
+from src.core.config import settings
+from src.core.resilience import RETRY_ON_NETWORK, with_retry
+
 HN_URL = "https://hn.algolia.com/api/v1"
 LOBSTERS_URL = "https://lobste.rs/hottest.json"
 DEVTO_URL = "https://dev.to/api/articles"
@@ -44,8 +47,23 @@ class ArticleFetcher:
 
     def __init__(self):
         self.client = httpx.AsyncClient(
-            timeout=20,
+            timeout=settings.fetch_timeout,
             headers={"User-Agent": "ilo-agent-demo/1.0"},
+        )
+
+    async def _get(self, url: str, params: dict | None = None) -> httpx.Response:
+        """带重试的 GET。
+
+        外网抓取抖动最常见（DNS 抖动、连接被重置、读超时），一次失败就判定该平台
+        不可用过于激进。只重试网络层瞬时故障；HTTP 4xx/5xx 仍由调用方的
+        raise_for_status() 处理，保持「单个平台失败不影响其他平台」的既有语义。
+        """
+        return await with_retry(
+            lambda: self.client.get(url, params=params),
+            attempts=2,
+            base_delay=1.0,
+            retry_on=RETRY_ON_NETWORK,
+            label="article_fetch",
         )
 
     async def fetch_articles(self, per_platform: int = 10, time_range: str = "day") -> List[Dict[str, Any]]:
@@ -75,7 +93,7 @@ class ArticleFetcher:
             ts = int((now - timedelta(days=days)).timestamp())
             url = f"{HN_URL}/search_by_date"
             params = {"query": "", "tags": "story", "hitsPerPage": n, "numericFilters": f"created_at_i>{ts}"}
-        resp = await self.client.get(url, params=params)
+        resp = await self._get(url, params=params)
         resp.raise_for_status()
         items = []
         for h in resp.json().get("hits", []):
@@ -101,7 +119,7 @@ class ArticleFetcher:
         return items
 
     async def _lobsters(self, n: int) -> List[Dict[str, Any]]:
-        resp = await self.client.get(LOBSTERS_URL)
+        resp = await self._get(LOBSTERS_URL)
         resp.raise_for_status()
         items = []
         for a in resp.json()[:n]:
@@ -125,7 +143,7 @@ class ArticleFetcher:
 
     async def _devto(self, n: int, time_range: str) -> List[Dict[str, Any]]:
         top = DEVTO_TOP.get(time_range, 7)
-        resp = await self.client.get(DEVTO_URL, params={"top": top, "per_page": n})
+        resp = await self._get(DEVTO_URL, params={"top": top, "per_page": n})
         resp.raise_for_status()
         items = []
         for a in resp.json():
@@ -149,7 +167,7 @@ class ArticleFetcher:
 
     async def _stackoverflow(self, n: int, time_range: str) -> List[Dict[str, Any]]:
         sort = SO_SORT.get(time_range, "hot")
-        resp = await self.client.get(SO_URL, params={
+        resp = await self._get(SO_URL, params={
             "order": "desc", "sort": sort, "site": "stackoverflow", "pagesize": n,
         })
         resp.raise_for_status()

@@ -80,11 +80,14 @@ def get_judge_llm():
     if _judge_llm is not None:
         return _judge_llm
     try:
+        from src.core.config import settings
         from src.modules.agent.state_machine import create_llm
     except Exception as e:  # noqa: BLE001 - 导入失败同样是「裁判不可用」
         raise JudgeUnavailableError(f"无法导入 LLM 客户端: {e}")
 
-    llm = create_llm("deepseek")
+    # 裁判也是下游调用，同样必须有界：不显式传超时会跟着 SDK 默认值走（分钟级），
+    # 一条卡住的评测足以把整轮 `pytest -m eval` 拖死。
+    llm = create_llm("deepseek", timeout=settings.llm_judge_timeout)
     if llm is None:
         raise JudgeUnavailableError("裁判模型不可用：未配置 DEEPSEEK_API_KEY")
     # 判分要的是稳定性：create_llm 默认 temperature=0.7 会让同一段输出每次打分漂移，

@@ -27,9 +27,11 @@ class _FakeKB:
     def __init__(self, vectors=None):
         self._vectors = vectors or {}
         self.calls = 0
+        self.last_deadline = "unset"
 
-    def get_vectors_by_ids(self, item_ids):
+    def get_vectors_by_ids(self, item_ids, deadline=None):
         self.calls += 1
+        self.last_deadline = deadline
         return {item_id: self._vectors[item_id] for item_id in item_ids if item_id in self._vectors}
 
 

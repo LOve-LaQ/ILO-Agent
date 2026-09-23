@@ -34,6 +34,8 @@ from qdrant_client.models import (
 )
 from loguru import logger
 
+from src.core.config import settings
+
 
 class MemoryManager:
     """记忆管理器"""
@@ -47,7 +49,11 @@ class MemoryManager:
         
         # 长期记忆 (Qdrant)
         qdrant_url = config.get("qdrant_url", "http://127.0.0.1:6333")
-        self.qdrant_client = QdrantClient(url=qdrant_url)
+        # 客户端取**写档**（6s）作天花板：这个客户端同时做 upsert 与检索，
+        # 检索在调用点单独按读档收紧到 4s。
+        self.qdrant_client = QdrantClient(
+            url=qdrant_url, timeout=settings.qdrant_write_timeout
+        )
         
         # 初始化 Collection
         self._init_collections()
@@ -231,6 +237,7 @@ class MemoryManager:
             collection_name="user_profiles",
             query=query_vector,
             limit=top_k,
+            timeout=settings.qdrant_timeout,
         )
 
         return [
@@ -286,6 +293,7 @@ class MemoryManager:
             collection_name="learning_history",
             query=query_vector,
             limit=top_k,
+            timeout=settings.qdrant_timeout,
             query_filter=Filter(
                 must=[FieldCondition(key="user_id", match=MatchValue(value=owner))]
             ),

@@ -13,6 +13,8 @@
 
 import feedparser
 import httpx
+
+from src.core.config import settings
 from typing import List, Dict, Any, Optional
 from datetime import datetime, timezone
 import hashlib
@@ -35,7 +37,7 @@ class NewsDiscoveryEngine:
     
     def __init__(self, config: Dict[str, Any] = None):
         self.config = config or {}
-        self.httpx_client = httpx.AsyncClient(timeout=30)
+        self.httpx_client = httpx.AsyncClient(timeout=settings.fetch_timeout)
         
     async def fetch_all_feeds(self, limit: int = 50) -> List[Dict[str, Any]]:
         """抓取所有 RSS 源"""

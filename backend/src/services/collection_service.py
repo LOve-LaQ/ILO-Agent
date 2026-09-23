@@ -16,6 +16,7 @@
 import asyncio
 import hashlib
 import os
+import time
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -25,7 +26,10 @@ from loguru import logger
 from sqlalchemy import func, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
+from src.core import circuit_breaker
+from src.core.config import settings
 from src.core.db import get_session_factory, is_database_configured
+from src.core.resilience import log_downstream_failure
 from src.models.collection import CollectionBatch, CollectionRecord
 
 BATCH_TRIGGER_MANUAL = "manual"
@@ -625,11 +629,31 @@ async def _generate_digest(record: CollectionRecord, item_id: str, content: str)
         raw_description=record.raw_description or "",
         readme=content,
     )
-    try:
-        result = await asyncio.to_thread(summary_llm.invoke, prompt)
-    except Exception as e:  # noqa: BLE001 - 生成失败降级，不让端点 500
-        logger.warning(f"[WARN] 中文导读生成失败: {item_id} - {e}")
+    # 熔断打开：摘要下游已连续失败，这次导读直接判为「生成不了」，
+    # 由调用方按既有的 unavailable 分支优雅降级。
+    if circuit_breaker.is_open(circuit_breaker.LLM_SUMMARY):
+        logger.warning(
+            "event=circuit_open downstream=llm_summary action=skip scope=card_digest"
+        )
         return None
+
+    _started = time.monotonic()
+    try:
+        # timeout 按次传入：客户端默认值只作兜底；导读与批量摘要同档位。
+        result = await asyncio.to_thread(
+            summary_llm.invoke, prompt, timeout=settings.llm_summary_timeout
+        )
+    except Exception as e:  # noqa: BLE001 - 生成失败降级，不让端点 500
+        circuit_breaker.record_failure(circuit_breaker.LLM_SUMMARY)
+        log_downstream_failure(
+            downstream="llm_summary",
+            exc=e,
+            elapsed_ms=(time.monotonic() - _started) * 1000,
+            timeout_s=settings.llm_summary_timeout,
+            scope=f"card_digest:{item_id}",
+        )
+        return None
+    circuit_breaker.record_success(circuit_breaker.LLM_SUMMARY)
 
     digest = (getattr(result, "content", "") or "").strip()
     # 与卡片摘要同一道中文化闸门：模型偶尔会用英文作答，放行就等于白花一次钱

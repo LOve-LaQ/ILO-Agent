@@ -29,6 +29,31 @@ from typing import List, Optional
 import hashlib
 import json
 import os
+import time
+
+from src.core import circuit_breaker
+from src.core.config import settings
+from src.core.resilience import (
+    RETRY_ON_NETWORK,
+    TRANSIENT_HTTP_STATUSES,
+    log_downstream_failure,
+    with_retry,
+)
+
+
+def _read_timeout_s(client) -> float:
+    """尽力读出 HTTP 客户端配置的读超时，读不到就返回 0。
+
+    【为什么要兜一层】这只是给观测日志补一个 timeout_s 字段。客户端可能被替换成
+    桩 / mock（没有 timeout 属性），或者 timeout 配成了 None —— 若因此抛异常，
+    就会把**原始的下游异常**顶掉，把一次网络故障伪装成一个 AttributeError，
+    真正的原因反而丢了。观测字段永远不该反过来炸掉主流程。
+    """
+    try:
+        value = getattr(getattr(client, "timeout", None), "read", None)
+        return float(value) if value is not None else 0.0
+    except Exception:  # noqa: BLE001 - 观测字段不得影响主流程
+        return 0.0
 
 
 class EmbeddingService:
@@ -79,7 +104,7 @@ class EmbeddingService:
         self.baidu_model = "embedding_v2"
         
         # HTTP 客户端
-        self.http_client = httpx.AsyncClient(timeout=30.0)
+        self.http_client = httpx.AsyncClient(timeout=settings.embedding_timeout)
         
         # 简单的文本缓存（避免重复计算）
         self._cache = {}
@@ -142,6 +167,53 @@ class EmbeddingService:
         print("[WARN] No valid API key found, using placeholder embedding")
         return "fallback"
     
+    async def _post(self, url: str, *, headers: dict, json: dict) -> httpx.Response:
+        """带重试 + 熔断的 POST。
+
+        只重试**网络层**瞬时故障（连接被重置 / 读超时）：embedding 是入库链路的
+        关键，一次抖动就落占位向量会在语义空间里留空洞。HTTP 4xx（Key 错、额度
+        耗尽）重试一万次结果一样，不重试 —— 仍由调用方按既有分支返回 None。
+
+        【为什么 5xx 不重试、却计入熔断】网络抖动是「不确定的瞬时故障」，重试一次
+        值得；5xx 是下游**已经明确宣告**自己不行了，重试只是在替它续命。这类失败
+        交给熔断处理：连续几次之后整个下游直接跳过，比逐个文本各等一次超时划算。
+        """
+        # 熔断打开：连 embedding 服务都连续失败了，本批入库直接走占位/跳过，
+        # 不再逐个文本去撞一次（每个都要等满超时）。
+        if circuit_breaker.is_open(circuit_breaker.EMBEDDING):
+            raise circuit_breaker.CircuitOpenError("embedding circuit open")
+
+        _started = time.monotonic()
+        try:
+            response = await with_retry(
+                lambda: self.http_client.post(url, headers=headers, json=json),
+                attempts=2,
+                base_delay=0.5,
+                retry_on=RETRY_ON_NETWORK,
+                label="embedding",
+            )
+        except Exception as exc:
+            circuit_breaker.record_failure(circuit_breaker.EMBEDDING)
+            log_downstream_failure(
+                downstream="embedding",
+                exc=exc,
+                elapsed_ms=(time.monotonic() - _started) * 1000,
+                timeout_s=_read_timeout_s(self.http_client),
+                # 同样用 getattr 兜底：观测字段读不到就留空，不能顶掉原始异常
+                scope=getattr(self, "_current_provider", "") or "",
+            )
+            raise
+
+        # 【计数口径】5xx / 429 计入熔断；4xx 既不算成功也不算失败。
+        # 4xx 是「我们的请求有问题」（Key 错、参数错），与下游健康度无关：
+        # 算成成功会把失败计数反复清零（零散网络故障永远攒不到阈值），
+        # 算成失败则一个配错的 Key 就能把熔断永久顶在 OPEN，反而掩盖真问题。
+        if response.status_code in TRANSIENT_HTTP_STATUSES:
+            circuit_breaker.record_failure(circuit_breaker.EMBEDDING)
+        elif response.status_code < 400:
+            circuit_breaker.record_success(circuit_breaker.EMBEDDING)
+        return response
+
     async def _request_embedding(self, text: str) -> Optional[List[float]]:
         """向 API 请求嵌入向量"""
         
@@ -152,7 +224,7 @@ class EmbeddingService:
         try:
             if self._current_provider == "aliyun":
                 # 阿里云 Qwen API
-                response = await self.http_client.post(
+                response = await self._post(
                     self.aliyun_url,
                     headers={
                         "Authorization": f"Bearer {self.api_key}",
@@ -171,7 +243,7 @@ class EmbeddingService:
                 )
             elif self._current_provider == "voyage":
                 # Voyage AI API
-                response = await self.http_client.post(
+                response = await self._post(
                     self.voyage_url,
                     headers={
                         "Authorization": f"Bearer {self.api_key}",
@@ -185,7 +257,7 @@ class EmbeddingService:
                 )
             elif self._current_provider == "openai":
                 # OpenAI API
-                response = await self.http_client.post(
+                response = await self._post(
                     self.openai_url,
                     headers={
                         "Authorization": f"Bearer {self.api_key}",
@@ -198,7 +270,7 @@ class EmbeddingService:
                 )
             elif self._current_provider == "zhipu":
                 # 智谱 AI API
-                response = await self.http_client.post(
+                response = await self._post(
                     self.zhipu_url,
                     headers={
                         "Authorization": f"Bearer {self.api_key}",
@@ -211,7 +283,7 @@ class EmbeddingService:
                 )
             elif self._current_provider == "baidu":
                 # 百度文心 API
-                response = await self.http_client.post(
+                response = await self._post(
                     self.baidu_url,
                     headers={
                         "Authorization": f"Bearer {self.api_key}",

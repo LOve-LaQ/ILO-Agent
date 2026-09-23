@@ -40,8 +40,8 @@ def get_redis():
             decode_responses=True,
             # 超时必须短：Redis 不可达时若按默认值等待，请求会卡住数秒，
             # 把「少一层防护」放大成「整个接口超时」。
-            socket_timeout=1.0,
-            socket_connect_timeout=1.0,
+            socket_timeout=settings.redis_socket_timeout,
+            socket_connect_timeout=settings.redis_socket_timeout,
         )
         client.ping()
         _client = client

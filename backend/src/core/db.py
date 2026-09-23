@@ -50,6 +50,11 @@ def _build_engine() -> Engine:
         pool_pre_ping=True,
         pool_size=5,
         max_overflow=10,
+        # 语句级超时交给**服务端**强制中断。只在客户端断连是不够的：客户端放弃后
+        # PostgreSQL 仍会把那条慢查询跑完并一直占着连接，池子会被慢慢耗干。
+        connect_args={
+            "options": f"-c statement_timeout={settings.db_statement_timeout_ms}"
+        },
     )
 
 

@@ -15,10 +15,12 @@
 import hashlib
 import os
 import random
+import time
 from typing import List, Dict, Any, Optional
 
 import redis
 from qdrant_client import QdrantClient
+from qdrant_client.http.exceptions import ResponseHandlingException
 from qdrant_client.models import (
     Distance,
     VectorParams,
@@ -28,6 +30,17 @@ from qdrant_client.models import (
     MatchAny,
     MatchValue,
 )
+
+from loguru import logger
+
+from src.core import circuit_breaker
+from src.core.config import settings
+from src.core.resilience import log_downstream_failure, with_retry_sync
+
+# Qdrant 客户端的「瞬时」异常：ResponseHandlingException 是底层传输层的包装
+# （httpx 连接失败 / 读超时都归到这里）。UnexpectedResponse 刻意不算 —— 那是
+# 「查询本身有问题」的 4xx 类错误，重试不会变好。
+QDRANT_TRANSIENT = (ResponseHandlingException, TimeoutError)
 
 COLLECTION = "tech_encyclopedia"
 VECTOR_SIZE = 1536
@@ -48,10 +61,18 @@ class TechKnowledgeBase:
     """技术卡片知识库（Qdrant + Redis）"""
 
     def __init__(self):
-        self.qdrant = QdrantClient(url=os.getenv("QDRANT_URL", "http://127.0.0.1:6333"))
+        # 客户端默认取**读档**（4s）：这个客户端绝大多数调用是 scroll / count 读操作；
+        # 写操作（upsert）在调用点单独按写档放宽到 6s。
+        self.qdrant = QdrantClient(url=settings.qdrant_url, timeout=settings.qdrant_timeout)
+        # 走 settings 而不是 os.getenv：pydantic-settings 同时覆盖进程环境与 .env 文件，
+        # 优先级也是「进程环境 > .env > 默认值」，是 os.getenv 的超集。
         self.redis = redis.Redis.from_url(
-            os.getenv("REDIS_URL", "redis://127.0.0.1:6379/0"),
+            settings.redis_url,
             decode_responses=True,
+            # 之前这里没配超时 = 无限等。Redis 不可达时整条链路会卡死，
+            # 而它只是热缓存 —— 该降级就得能降下去。
+            socket_timeout=settings.redis_socket_timeout,
+            socket_connect_timeout=settings.redis_socket_timeout,
         )
         self._init_collection()
 
@@ -144,6 +165,7 @@ class TechKnowledgeBase:
         self.qdrant.upsert(
             collection_name=COLLECTION,
             points=[PointStruct(id=point_id, vector=vector, payload=payload)],
+            timeout=settings.qdrant_write_timeout,
         )
 
     # ==================== 读取 ====================
@@ -281,7 +303,9 @@ class TechKnowledgeBase:
             return points[0].payload
         return None
 
-    def get_vectors_by_ids(self, item_ids) -> Dict[str, List[float]]:
+    def get_vectors_by_ids(
+        self, item_ids, deadline: Optional[float] = None
+    ) -> Dict[str, List[float]]:
         """批量按 id 取**已存向量**，返回 {item_id: vector}。
 
         兴趣画像要复用卡片入库时的向量，而不是拿 summary 重新 embed：重新 embed 既
@@ -293,17 +317,43 @@ class TechKnowledgeBase:
         ids = [str(i) for i in item_ids if i]
         if not ids:
             return {}
+        # 熔断打开：Qdrant 已连续失败，画像直接当作「取不到向量」，
+        # 由调用方回退随机抽样 —— 比逐个请求去撞一次快得多。
+        if circuit_breaker.is_open(circuit_breaker.QDRANT_READ):
+            print(
+                "[WARN] event=circuit_open downstream=qdrant_read action=skip "
+                "scope=interest_profile"
+            )
+            return {}
+
+        _started = time.monotonic()
         try:
-            points, _ = self.qdrant.scroll(
-                collection_name=COLLECTION,
-                scroll_filter=Filter(must=[FieldCondition(key="id", match=MatchAny(any=ids))]),
-                limit=len(ids),
-                with_payload=True,
-                with_vectors=True,
+            # 画像取向量是「尽力而为」的个性化链路，但一次连接抖动就整批回退随机
+            # 过于激进：重试 1 次（0.3s 退避）足够吸收连接重置这类瞬时故障。
+            points, _ = with_retry_sync(
+                lambda: self.qdrant.scroll(
+                    collection_name=COLLECTION,
+                    scroll_filter=Filter(must=[FieldCondition(key="id", match=MatchAny(any=ids))]),
+                    limit=len(ids),
+                    with_payload=True,
+                    with_vectors=True,
+                ),
+                attempts=1,
+                base_delay=0.3,
+                retry_on=QDRANT_TRANSIENT,
+                label="qdrant_read",
+                deadline=deadline,
             )
         except Exception as e:
-            print(f"[WARN] get_vectors_by_ids failed: {e}")
+            circuit_breaker.record_failure(circuit_breaker.QDRANT_READ)
+            log_downstream_failure(
+                downstream="qdrant_read",
+                exc=e,
+                elapsed_ms=(time.monotonic() - _started) * 1000,
+                scope="interest_profile",
+            )
             return {}
+        circuit_breaker.record_success(circuit_breaker.QDRANT_READ)
 
         vectors: Dict[str, List[float]] = {}
         for p in points:

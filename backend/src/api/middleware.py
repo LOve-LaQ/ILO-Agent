@@ -11,11 +11,15 @@
 
 import re
 
+from typing import Optional
+
 from fastapi import Request
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.types import ASGIApp
 
+from src.core.config import settings
 from src.core.context import new_request_id, set_request_id
+from src.core.deadline import new_deadline
 
 REQUEST_ID_HEADER = "x-request-id"
 MAX_REQUEST_ID_LEN = 64
@@ -51,9 +55,50 @@ class RequestContextMiddleware(BaseHTTPMiddleware):
         return response
 
 
+# 请求级超时预算（秒）：路径正则 → Settings 字段名。
+# 【为什么按路径匹配而不是按路由】BaseHTTPMiddleware 的 dispatch 早于路由解析，
+# 此时 scope 里还没有 endpoint；路径是这一层唯一拿得到的信息。
+# 未匹配到的接口不设 deadline（不限制）—— 预算只对真正会打下游的接口有意义。
+_DEADLINE_RULES: tuple[tuple["re.Pattern", str], ...] = (
+    (re.compile(r"^/api/v1/learning/chat/?$"), "deadline_learning_chat_seconds"),
+    (re.compile(r"^/api/v1/learning/session/?$"), "deadline_learning_session_seconds"),
+    (re.compile(r"^/api/v1/learning/response/?$"), "deadline_learning_response_seconds"),
+    (re.compile(r"^/api/v1/discover/news/?$"), "deadline_discover_news_seconds"),
+    (re.compile(r"^/api/v1/discover/cards/[^/]+/digest/?$"), "deadline_card_digest_seconds"),
+)
+
+
+def resolve_budget(path: str) -> Optional[float]:
+    """按路径取该接口的请求级预算（秒）；无规则或配成非正数时返回 None（不限制）"""
+    for pattern, setting_name in _DEADLINE_RULES:
+        if pattern.match(path):
+            value = getattr(settings, setting_name, 0.0)
+            # 配 0 或负数表示「该接口不设预算」，便于排查时临时放行
+            return value if value > 0 else None
+    return None
+
+
+class DeadlineMiddleware(BaseHTTPMiddleware):
+    """给请求注入超时预算，写进 `request.state.deadline`。
+
+    下游一律用 `clamp_timeout(本层配置超时, deadline)` 取本次调用真正可用的超时，
+    返回 0 即表示预算已耗尽，应直接降级而不是发起调用。
+    """
+
+    async def dispatch(self, request: Request, call_next):
+        budget = resolve_budget(request.url.path)
+        if budget is not None:
+            # Request.state 落在 scope["state"] 上，call_next 会把同一个 scope
+            # 继续往下传，因此路由里能读到（不是中间件私有的副本）
+            request.state.deadline = new_deadline(budget)
+        return await call_next(request)
+
+
 __all__ = [
     "MAX_REQUEST_ID_LEN",
     "REQUEST_ID_HEADER",
+    "DeadlineMiddleware",
     "RequestContextMiddleware",
+    "resolve_budget",
     "sanitize_request_id",
 ]

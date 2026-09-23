@@ -273,13 +273,18 @@ def _save_profile(
         logger.warning(f"[WARN] 兴趣画像写入失败（不影响本次推荐）: {e}")
 
 
-def build_user_profile(user_id: UserId) -> Optional[List[float]]:
+def build_user_profile(
+    user_id: UserId, deadline: Optional[float] = None
+) -> Optional[List[float]]:
     """构建（或复用）用户兴趣向量；任一环节不可用返回 None，上层据此回退随机。
 
     复用条件（三者同时成立才复用，否则重算）：
     1. 已存画像存在；
     2. `embedding_model` 指纹与当前一致（语义空间没变）；
     3. 参与构建的卡片数一致（没有新的兴趣信号进来）。
+
+    deadline 是请求级预算的 monotonic 时间点（可为 None）：取向量那一步会把它
+    透传给重试层，保证重试也受同一个总预算约束。
     """
     uid = _coerce_user_id(user_id)
     if uid is None or not is_database_configured():
@@ -312,7 +317,9 @@ def build_user_profile(user_id: UserId) -> Optional[List[float]]:
     try:
         from src.modules.discovery.tech_knowledge import get_knowledge_base
 
-        vectors = get_knowledge_base().get_vectors_by_ids(candidates)
+        vectors = get_knowledge_base().get_vectors_by_ids(
+            candidates, deadline=deadline
+        )
     except Exception as e:  # noqa: BLE001 - 知识库不可用 → 回退随机
         logger.warning(f"[WARN] 画像取向量失败: {e}")
         return None

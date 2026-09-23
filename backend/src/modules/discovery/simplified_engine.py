@@ -14,13 +14,15 @@ from typing import List, Dict, Any, Optional
 from datetime import datetime, timezone
 import hashlib
 
+from src.core.config import settings
+
 
 class SimplifiedNewsDiscoveryEngine:
     """简化的资讯发现引擎"""
     
     def __init__(self, config: Dict[str, Any] = None):
         self.config = config or {}
-        self.httpx_client = httpx.AsyncClient(timeout=30)
+        self.httpx_client = httpx.AsyncClient(timeout=settings.fetch_timeout)
         
         # 内置示例资讯数据（替代 RSS）
         self.fallback_news_template = [

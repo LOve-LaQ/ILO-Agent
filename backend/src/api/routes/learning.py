@@ -16,6 +16,7 @@
 """
 
 from datetime import datetime, timedelta, timezone
+import asyncio
 import os
 import time
 import uuid
@@ -25,8 +26,12 @@ from fastapi import APIRouter, Depends, Request
 from loguru import logger
 
 from src.api.deps import CurrentUser
+from src.core import circuit_breaker
+from src.core.config import settings
+from src.core.deadline import clamp_timeout
 from src.core.errors import ERROR_RESPONSES, ILOException
 from src.core.rate_limit import LEARNING_CHAT_IP, rate_limit
+from src.core.resilience import log_downstream_failure
 from src.schemas.learning import (
     ChatRequest,
     ChatResponse,
@@ -473,18 +478,56 @@ async def chat_with_ai(request: Request, data: ChatRequest, user: CurrentUser) -
 {chr(10).join([f"{msg['role']}: {msg['content']}" for msg in history[-10:]]) if history else "暂无历史"}
 """
 
+    # 请求级预算：把「这次请求还剩多少时间」夹到本次 LLM 调用上。
+    # 剩余不足就直接降级 —— 让网关先超时、用户拿到 502，比拿到一段降级文案更糟。
+    llm_timeout = clamp_timeout(
+        settings.llm_chat_timeout, getattr(request.state, "deadline", None)
+    )
+
     # 调用 LLM
-    if LLM_AVAILABLE and llm is not None:
+    if llm_timeout <= 0:
+        logger.warning(
+            "event=downstream_fallback downstream=llm_chat reason=deadline_exhausted"
+        )
+        ai_response = _generate_fallback_response(user_message, news_context)
+    elif LLM_AVAILABLE and llm is not None and circuit_breaker.is_open(
+        circuit_breaker.LLM_CHAT
+    ):
+        # 熔断打开：下游已连续失败，本请求直接降级 —— 不再去撞一次，
+        # 也不占用本请求的预算（撞上去只会把「快降级」拖成「等满超时再降级」）。
+        logger.warning(
+            "event=circuit_open downstream=llm_chat action=fallback scope=chat"
+        )
+        ai_response = _generate_fallback_response(user_message, news_context)
+    elif LLM_AVAILABLE and llm is not None:
+        _started = time.monotonic()
         try:
-            response = llm.invoke(system_prompt)
+            # 同步 invoke 在 async 路由里会独占事件循环：一次几十秒的 LLM 调用期间，
+            # 同 worker 上所有请求（含 /health）全部排队。卸载到线程池后立即归还。
+            # timeout 按次传入：客户端默认值只作兜底，本次真正可用的时间由预算决定。
+            response = await asyncio.to_thread(
+                llm.invoke, system_prompt, timeout=llm_timeout
+            )
             ai_response = (response.content or "").strip()
             if not ai_response:
                 # 空内容也是失败：若原样返回，前端会渲染出一个空气泡，
                 # 被当成「AI 回答了但没说话」而不是「这轮没答上来」
                 raise ValueError("LLM 返回空内容")
+            circuit_breaker.record_success(circuit_breaker.LLM_CHAT)
             logger.info(f"✅ LLM generated response for session {session_id}")
         except Exception as llm_error:
-            logger.error(f"❌ LLM generation failed: {llm_error}")
+            # 只有「真的调用了且失败」才计数。预算耗尽与熔断打开都走上面的分支 ——
+            # 若把「我们主动跳过」也算成下游失败，熔断会被自己顶在 OPEN 永不恢复。
+            circuit_breaker.record_failure(circuit_breaker.LLM_CHAT)
+            # 超时与非超时会拆成两个事件：前者指向「预算配得合不合理」，
+            # 后者指向「下游是不是挂了」，混在一起两类问题都看不清。
+            log_downstream_failure(
+                downstream="llm_chat",
+                exc=llm_error,
+                elapsed_ms=(time.monotonic() - _started) * 1000,
+                timeout_s=llm_timeout,
+                scope="chat",
+            )
             ai_response = _generate_fallback_response(user_message, news_context)
     else:
         # 模型未配置：明确告知不可用，绝不编造内容（详见该函数的 docstring）
@@ -540,7 +583,8 @@ async def process_user_response(
 
     result = await sm.process_user_response(
         context=context,
-        user_input=data.user_input
+        user_input=data.user_input,
+        deadline=getattr(request.state, "deadline", None),
     )
 
     # 这一步可能刚生成 quiz_questions，是整条链路里最需要落库的一次同步

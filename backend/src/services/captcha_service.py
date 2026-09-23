@@ -27,8 +27,9 @@ from loguru import logger
 from src.core.config import settings
 from src.core.errors import ILOException
 
-# 上游校验的超时：这是注册链路里的同步阻塞点，超过这个时间用户已经在怀疑卡死了
-VERIFY_TIMEOUT_SECONDS = 5.0
+# 上游校验的超时见 Settings.captcha_timeout：这是注册链路里的同步阻塞点，
+# 超过这个时间用户已经在怀疑卡死了。不在这里存常量 —— 模块级常量在导入时冻结，
+# 改了 .env 也不会生效，排查时反而更难解释。
 
 
 class CaptchaError(ILOException):
@@ -129,7 +130,7 @@ class VaptchaVerifier(CaptchaVerifier):
             response = httpx.post(
                 settings.vaptcha_verify_url,
                 json=payload,
-                timeout=VERIFY_TIMEOUT_SECONDS,
+                timeout=settings.captcha_timeout,
             )
             body = response.json()
         except Exception as e:  # noqa: BLE001 - 网络/解析异常统一按未通过处理

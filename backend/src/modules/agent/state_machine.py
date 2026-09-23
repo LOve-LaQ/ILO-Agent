@@ -8,13 +8,26 @@ LangGraph 风格的状态机编排
 """
 
 from enum import Enum
+from pathlib import Path
 from typing import Dict, Any, Optional
 from datetime import datetime, timedelta, timezone
 import asyncio
 import os
 import sys
+import time
 from dotenv import load_dotenv
 from loguru import logger
+
+# 允许以脚本方式直接自测（python src/modules/agent/state_machine.py）：
+# 那种跑法下 sys.path[0] 是本文件所在目录，`src.` 前缀导入必然失败，
+# 需要先把 backend 根补进 sys.path。被正常导入时 __package__ 非空，跳过。
+if not __package__:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
+
+from src.core import circuit_breaker
+from src.core.config import settings
+from src.core.deadline import clamp_timeout
+from src.core.resilience import log_downstream_failure
 
 # 【禁止在此处调用 logger.remove() / logger.add()】
 # 全局日志由 src.core.config.setup_logger() 统一注册（含 request_id 与文件落盘）。
@@ -44,7 +57,7 @@ except ImportError:
 
 
 # 初始化 LLM 客户端（支持多种 Provider）
-def create_llm(provider="auto", api_key=None, base_url=None):
+def create_llm(provider="auto", api_key=None, base_url=None, timeout: Optional[float] = None):
     """
     创建 LLM 客户端
     
@@ -52,10 +65,19 @@ def create_llm(provider="auto", api_key=None, base_url=None):
         provider: "auto" | "openai" | "deepseek" | "other"
         api_key: API Key
         base_url: API 端点 URL (可选)
+        timeout: 单次调用超时（秒）；未传时取 Settings.llm_chat_timeout
     """
     if not LLM_AVAILABLE:
         return None
     
+    # 【为什么必须显式给 timeout 且 max_retries=0】
+    # 不传 timeout 时走 openai SDK 默认值（量级为分钟），一次上游半开或挂起就会把
+    # async 路由所在的事件循环一直占住；而 SDK 自带的隐式重试会让「50s 超时」
+    # 实际变成 150s，把超时预算彻底架空。重试必须由应用层统一控制，
+    # 所以这里统一关掉 SDK 重试，并把超时值收敛到配置项。
+    if timeout is None:
+        timeout = settings.llm_chat_timeout
+
     # 自动检测或直接指定 provider
     if provider == "auto":
         # 优先检查 DeepSeek（通常更快、更便宜）
@@ -67,7 +89,9 @@ def create_llm(provider="auto", api_key=None, base_url=None):
                 openai_api_key=ds_api_key,
                 openai_api_base="https://api.deepseek.com/v1",
                 temperature=0.7,
-                max_tokens=4096
+                max_tokens=4096,
+                timeout=timeout,
+                max_retries=0,
             )
         
         # 回退到 OpenAI
@@ -78,7 +102,9 @@ def create_llm(provider="auto", api_key=None, base_url=None):
                 model="gpt-3.5-turbo",
                 openai_api_key=openai_key,
                 temperature=0.7,
-                max_tokens=4096
+                max_tokens=4096,
+                timeout=timeout,
+                max_retries=0,
             )
         
         logger.warning("No API key found, using fallback mode")
@@ -96,7 +122,9 @@ def create_llm(provider="auto", api_key=None, base_url=None):
             openai_api_key=api_key,
             openai_api_base="https://api.deepseek.com/v1",
             temperature=0.7,
-            max_tokens=4096
+            max_tokens=4096,
+            timeout=timeout,
+            max_retries=0,
         )
     
     elif provider == "openai":
@@ -110,7 +138,9 @@ def create_llm(provider="auto", api_key=None, base_url=None):
             model="gpt-3.5-turbo",
             openai_api_key=api_key,
             temperature=0.7,
-            max_tokens=4096
+            max_tokens=4096,
+            timeout=timeout,
+            max_retries=0,
         )
     
     else:
@@ -121,14 +151,17 @@ def create_llm(provider="auto", api_key=None, base_url=None):
             openai_api_key=api_key or os.getenv("OPENAI_API_KEY"),
             openai_api_base=base_url,
             temperature=0.7,
-            max_tokens=4096
+            max_tokens=4096,
+            timeout=timeout,
+            max_retries=0,
         )
 
 
-def create_qwen_llm():
+def create_qwen_llm(timeout: Optional[float] = None):
     """创建通义千问 LLM 客户端（用于批量中文摘要等离线整理任务）
 
     DashScope 的 OpenAI 兼容模式；无 ALIYUN_API_KEY 时返回 None（调用方回退 DeepSeek）。
+    timeout 未传时取 Settings.llm_summary_timeout —— 摘要一批 20 条，天然比对话长。
     """
     if not LLM_AVAILABLE:
         return None
@@ -137,20 +170,26 @@ def create_qwen_llm():
         logger.warning("No ALIYUN_API_KEY found, summaries will fallback to DeepSeek")
         return None
     logger.info("Using Qwen (DashScope) for summaries")
+    if timeout is None:
+        timeout = settings.llm_summary_timeout
     return ChatOpenAI(
         model="qwen-plus",
         openai_api_key=qwen_key,
         openai_api_base="https://dashscope.aliyuncs.com/compatible-mode/v1",
         temperature=0.3,
         max_tokens=4096,
+        timeout=timeout,
+        max_retries=0,
     )
 
 
 # 创建主 LLM 实例（对话用 DeepSeek）
 llm = create_llm()
 
-# 摘要/整理类任务优先用通义千问，不可用时回退到 DeepSeek
-summary_llm = create_qwen_llm() or llm
+# 摘要/整理类任务优先用通义千问，不可用时回退到 DeepSeek。
+# 【回退时必须换成 summary 档超时】直接 `or llm` 会拿到对话档的 50s，而批量摘要
+# 一批 20 条按预算表应有 95s —— 没有 ALIYUN_API_KEY 的环境下摘要会被提前掐断。
+summary_llm = create_qwen_llm() or create_llm(timeout=settings.llm_summary_timeout)
 
 if llm is None:
     logger.warning("=" * 50)
@@ -181,12 +220,32 @@ class ExplanationEngine:
         self.config = config
         self.use_fallback = llm is None or not LLM_AVAILABLE
         
-    async def generate(self, topic: str, context: dict) -> str:
+    async def generate(
+        self, topic: str, context: dict, deadline: Optional[float] = None
+    ) -> str:
         """生成讲解内容（使用 OpenAI LLM）"""
         if self.use_fallback:
             # 降级模式
             return self._generate_fallback_explanation(topic, context)
-        
+
+        # 请求级预算：剩余不足就不发起调用，直接降级。
+        # 「返回一个很小的正数」和「返回 0」有本质区别 —— 前者仍会真的发起一次
+        # 注定超时的调用，白占线程与连接，然后照样降级，只是慢了一截。
+        timeout = clamp_timeout(settings.llm_chat_timeout, deadline)
+        if timeout <= 0:
+            logger.warning(
+                "event=downstream_fallback downstream=llm_chat reason=deadline_exhausted"
+            )
+            return self._generate_fallback_explanation(topic, context)
+
+        if circuit_breaker.is_open(circuit_breaker.LLM_CHAT):
+            logger.warning(
+                "event=circuit_open downstream=llm_chat action=fallback "
+                "scope=explanation"
+            )
+            return self._generate_fallback_explanation(topic, context)
+
+        _started = time.monotonic()
         try:
             # 真实 LLM 模式
             prompt = f"""你是一个人工智能技术导师，擅长用简洁易懂的方式讲解技术概念。
@@ -206,11 +265,23 @@ class ExplanationEngine:
 
 使用 Markdown 格式输出："""
             
-            result = llm.invoke(prompt)
+            # 卸载到线程池：generate 必须保持 async（调用方继续 await 它），
+            # 但底层 llm.invoke 是同步阻塞的 —— 直接裸调会独占事件循环，
+            # 期间同 worker 上所有请求（含 /health）全部排队。
+            # timeout 按次传入：客户端默认值只作兜底，本次可用时间由预算决定。
+            result = await asyncio.to_thread(llm.invoke, prompt, timeout=timeout)
+            circuit_breaker.record_success(circuit_breaker.LLM_CHAT)
             return result.content
-            
+
         except Exception as e:
-            print(f"❌ LLM generation failed: {e}")
+            circuit_breaker.record_failure(circuit_breaker.LLM_CHAT)
+            log_downstream_failure(
+                downstream="llm_chat",
+                exc=e,
+                elapsed_ms=(time.monotonic() - _started) * 1000,
+                timeout_s=timeout,
+                scope="explanation",
+            )
             return self._generate_fallback_explanation(topic, context)
     
     def strip_formatting(self, text: str) -> str:
@@ -404,7 +475,9 @@ class LearningStateMachine:
             "actions": ["展开讲讲", "太累了明天再说", "加入复习队列"]
         }
     
-    async def process_user_response(self, context: dict, user_input: str) -> dict:
+    async def process_user_response(
+        self, context: dict, user_input: str, deadline: Optional[float] = None
+    ) -> dict:
         """处理用户响应"""
         intent = self._detect_intent(user_input)
         
@@ -417,9 +490,9 @@ class LearningStateMachine:
             return {"state": LearningState.IDLE, "action": "bookmark", "message": "已添加到收藏夹📚"}
         
         else:
-            return await self.start_learning(context)
+            return await self.start_learning(context, deadline=deadline)
     
-    async def start_learning(self, context: dict) -> dict:
+    async def start_learning(self, context: dict, deadline: Optional[float] = None) -> dict:
         """开始深入学习（异步调用 LLM）"""
         context["current_state"] = LearningState.LEARNING
         
@@ -428,7 +501,8 @@ class LearningStateMachine:
         # 导致 /learning/response 的 explanation 字段响应校验失败（string_type）。
         explanation = await self.explanation_engine.generate(
             context["topic"],
-            context
+            context,
+            deadline=deadline,
         )
         
         quiz_questions = self.quiz_factory.generate(
