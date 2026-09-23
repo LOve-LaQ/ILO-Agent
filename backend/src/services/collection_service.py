@@ -34,6 +34,9 @@ from src.models.collection import CollectionBatch, CollectionRecord
 
 BATCH_TRIGGER_MANUAL = "manual"
 BATCH_TRIGGER_SCHEDULED = "scheduled"
+# 脚本一次性灌库（如 backfill_repos_30d.py）。与前两者的区别是「谁触发的」——
+# 事后查批次表时要能分清「用户点的 / 定时跑的 / 有人跑脚本灌的」。
+BATCH_TRIGGER_SCRIPT = "script"
 
 UserId = Union[uuid.UUID, str, None]
 
@@ -951,6 +954,7 @@ async def collect_items(
 __all__ = [
     "BATCH_TRIGGER_MANUAL",
     "BATCH_TRIGGER_SCHEDULED",
+    "BATCH_TRIGGER_SCRIPT",
     "PLATFORM_BY_SOURCE",
     "CollectResult",
     "backfill_records",

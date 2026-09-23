@@ -374,8 +374,15 @@ async def summarize_items(items: List[Dict[str, Any]], kind: str = "repo", batch
     if not items:
         return items
 
+    # 大批量摘要是全程静默的：1000 条约 45 次 LLM 调用，跑十几分钟。
+    # 没有进度日志时，运维分不清「在跑」和「卡死」，只能靠猜。
+    started_at = time.monotonic()
     for start in range(0, len(items), batch_size):
         batch = items[start:start + batch_size]
+        logger.info(
+            f"摘要进度 {start}/{len(items)}（本批 {len(batch)} 条，"
+            f"已耗时 {time.monotonic() - started_at:.0f}s）"
+        )
         parsed = await _summarize_batch(batch, kind=kind)
         if parsed and len(parsed) >= len(batch):
             for i, item in enumerate(batch):
@@ -396,6 +403,11 @@ async def summarize_items(items: List[Dict[str, Any]], kind: str = "repo", batch
             if one and isinstance(one[0], dict):
                 _apply_summary(it, one[0])
 
+    applied = sum(1 for it in items if it.get("summary"))
+    logger.info(
+        f"摘要完成：{applied}/{len(items)} 条拿到中文摘要，"
+        f"总耗时 {time.monotonic() - started_at:.0f}s"
+    )
     return items
 
 

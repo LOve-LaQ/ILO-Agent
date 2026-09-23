@@ -18,6 +18,7 @@ from src.services.bookmark_service import (
 from src.services.collection_service import (
     BATCH_TRIGGER_MANUAL,
     BATCH_TRIGGER_SCHEDULED,
+    BATCH_TRIGGER_SCRIPT,
     CollectResult,
     build_provenance,
     collect_items,
@@ -58,6 +59,7 @@ from src.services.recommend import (
 __all__ = [
     "BATCH_TRIGGER_MANUAL",
     "BATCH_TRIGGER_SCHEDULED",
+    "BATCH_TRIGGER_SCRIPT",
     "BookmarkError",
     "CollectResult",
     "add_bookmark",

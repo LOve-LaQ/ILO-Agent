@@ -21,7 +21,9 @@ from sqlalchemy.sql import expression
 from src.models.base import Base
 
 # 批次触发方式 / 状态（受控词表，避免各调用点写错字符串）
-BATCH_TRIGGERS = ("manual", "scheduled")
+# script 是「运维/开发跑脚本一次性灌库」，与用户点按钮（manual）、定时任务
+# （scheduled）区分开 —— 否则事后无法回答「这批是谁触发的」
+BATCH_TRIGGERS = ("manual", "scheduled", "script")
 BATCH_STATUSES = ("running", "succeeded", "partial", "failed")
 RECORD_STATUSES = ("summarized", "deduped", "failed")
 
@@ -36,7 +38,7 @@ class CollectionBatch(Base):
     )
     # repo | article
     kind: Mapped[str] = mapped_column(String(16), nullable=False)
-    # manual | scheduled
+    # manual | scheduled | script
     trigger: Mapped[str] = mapped_column(String(16), nullable=False, default="manual")
     # 手动触发时记录操作人；定时任务为 NULL（ondelete=SET NULL 保留批次历史）
     operator_user_id: Mapped[uuid.UUID | None] = mapped_column(

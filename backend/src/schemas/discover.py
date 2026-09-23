@@ -66,7 +66,7 @@ class ProvenanceBatch(BaseModel):
 
     id: str
     kind: str = Field(..., description="repo | article")
-    trigger: str = Field(..., description="manual | scheduled")
+    trigger: str = Field(..., description="manual | scheduled | script")
     status: str = Field(..., description="running | succeeded | partial | failed")
     params: Optional[Dict[str, Any]] = Field(None, description="本次抓取参数，用于复现")
     fetched_count: int = 0

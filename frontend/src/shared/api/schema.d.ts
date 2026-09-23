@@ -1714,7 +1714,7 @@ export interface components {
             kind: string;
             /**
              * Trigger
-             * @description manual | scheduled
+             * @description manual | scheduled | script
              */
             trigger: string;
             /**
