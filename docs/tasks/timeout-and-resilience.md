@@ -91,6 +91,9 @@
 | 抓取 | httpx 20~30s | `article_fetcher.py:47`、`engine.py:38`、`github_fetcher.py:66,202,226`、`simplified_engine.py:23` |
 | LLM | **无** | — |
 
+> 上表是**诊断时的快照**。其中 `engine.py` 与 `simplified_engine.py` 后来已作为死代码删除
+> （见第七节），这两行仅作历史记录保留。
+
 **问题**：这些值是「每层各自拍的」，**没有从请求入口往下传递的预算**。`/learning/chat` 一次请求最坏情况 = Redis 1s + PG 3s + LLM（无界）→ 总耗时不可控。
 
 另外 `httpx.AsyncClient(timeout=30.0)` 是**单值**，会同时作用于 connect / read / write / pool 四个阶段 —— 连接建立和读取响应共享同一个 30s，语义上应该拆开（连接快失败、读取给足）。
@@ -545,10 +548,15 @@ SMTP_TIMEOUT=10.0
 5. **`summary_llm` 回退路径会串档**：`create_qwen_llm() or llm` 在无 `ALIYUN_API_KEY` 时
    拿到对话档 50s，而批量摘要应有 95s。已改为回退时用 `create_llm(timeout=llm_summary_timeout)` 重建。
 
-**执行中发现、但未处理的既有问题（与本任务无关，仅记录）**
+**执行中发现的既有问题**
 
-- `src/modules/discovery/engine.py`（`NewsDiscoveryEngine`）与 `simplified_engine.py`
-  （`SimplifiedNewsDiscoveryEngine`）**全项目零引用**，且 `engine.py` 依赖的 `feedparser`
-  在 Python 3.13 上已无法导入（其 `encodings.py` 仍 `import cgi`，而 `cgi` 自 3.13 起被移除）。
-  即：这两个模块目前既不可用也无人用。本任务只顺带把它们的超时改成配置项，未删除。
-- `Settings` 里 `max_tokens` / `num_questions` / `request_rate_limit` 三个字段零引用。
+- ✅ **已处理**：`src/modules/discovery/engine.py`（`NewsDiscoveryEngine`）与
+  `simplified_engine.py`（`SimplifiedNewsDiscoveryEngine`）**全项目零引用**，且
+  `engine.py` 依赖的 `feedparser` 在 Python 3.13 上已无法导入（其 `encodings.py`
+  仍 `import cgi`，而 `cgi` 自 3.13 起被移除）—— 既不可用也无人用。
+  两个模块连同只被它们使用的 `feedparser` / `lxml` / `beautifulsoup4` 三个依赖一并删除。
+- ⬜ **未处理**：`Settings` 里 `max_tokens` / `num_questions` / `request_rate_limit`
+  三个字段零引用。没有直接删，是因为 `max_tokens=4096` 与 `num_questions=3` 这两个值
+  在 `api/routes/learning.py` 里是**硬编码**的（`{"max_tokens": 4096, "num_questions": 3}`），
+  看起来更像是「该接线却忘了接线」而不是「该删的废字段」——
+  正确的修法是让那两个值读 Settings，而不是删掉配置项。

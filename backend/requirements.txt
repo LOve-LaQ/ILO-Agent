@@ -22,11 +22,10 @@ qdrant-client>=1.7.0
 ## Async HTTP & Data Processing
 redis==5.0.1
 httpx==0.26.0
-feedparser==6.0.10
-lxml>=5.1.0
-beautifulsoup4==4.12.3
-# Note: feedparser has compatibility issues with Python 3.13 (cgi module removed)
-# Consider using Python 3.11 or 3.12 for RSS crawling
+# feedparser / lxml / beautifulsoup4 已随 discovery/engine.py 一并移除：
+# 那个 RSS 抓取引擎全项目零引用，且 feedparser 依赖的 cgi 模块自 Python 3.13 起被移除，
+# 在 3.13 上根本无法导入（它自己的 encodings.py 仍 `import cgi`）。
+# 现役抓取链路是 github_fetcher / article_fetcher，只用 httpx，不需要 HTML 解析库。
 
 ## Task Scheduler (简化版 - 可选)
 apscheduler==3.10.4

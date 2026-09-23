@@ -151,8 +151,6 @@ ilo-agent-demo/
 │   │       │   ├── embedding_service.py # 向量化服务（多 Provider）
 │   │       │   └── context.py       # 上下文对象设计
 │   │       └── discovery/           # ⭐⭐ 数据采集
-│   │           ├── engine.py             # RSS 爬虫引擎
-│   │           ├── simplified_engine.py  # 简化版（避开兼容性问题）
 │   │           ├── article_fetcher.py    # 文章抓取
 │   │           ├── github_fetcher.py     # GitHub 内容抓取
 │   │           ├── summary_spec.py       # 摘要生成规范
@@ -200,14 +198,18 @@ IDLE → PUSHED → LEARNING → QUIZ → FSRS_UPDATE → COMPLETED
 
 **设计要点**: 面向对话系统的分层 Memory 设计
 
-### **3. 资讯发现引擎** (`backend/src/modules/discovery/simplified_engine.py`)
+### **3. 资讯发现引擎** (`backend/src/modules/discovery/`)
 
 **功能**: 
-- 抓取多个技术源（GitHub Trending, Hacker News 等）
+- 抓取多个技术源（GitHub Trending / 仓库 README / 技术文章）
 - 自动去重 + 标签分类
 - 存入 Qdrant 向量库
 
-**设计要点**: 异步爬虫 + ETL Pipeline 实现
+**组成**: `github_fetcher.py`（GitHub API + README 预取）、`article_fetcher.py`（多平台文章）、
+`tech_knowledge.py`（Qdrant + Redis 知识库读写）、`summary_spec.py`（LLM 摘要的中文化与事实边界规范）
+
+**设计要点**: 异步爬虫 + ETL Pipeline 实现；每条下游调用都带超时、重试与熔断
+（见 `src/core/resilience.py`、`src/core/circuit_breaker.py`）
 
 ### **4. FSRS 间隔重复算法**
 
@@ -427,7 +429,7 @@ A: 不是必须的！当前版本有降级策略：
 
 A: 已解决！主要改动：
 1. 使用 loguru 替代 print()，强制 UTF-8 编码
-2. 简化爬虫引擎，避免 feedparser 的兼容性 issue
+2. 移除依赖 `feedparser` 的 RSS 引擎，抓取链路统一改用 httpx 直接请求 API
 
 ### **Q: 如何扩展真实 LLM 功能？**
 
@@ -494,7 +496,10 @@ logger.info("Using DeepSeek API")
 
 **问题**: `cgi`模块被移除导致 `feedparser` 失败
 
-**解决方案**: 简化爬虫引擎，改用 httpx 直接请求 API
+**解决方案**: 已彻底移除依赖 `feedparser` 的 RSS 引擎（`discovery/engine.py` 与
+`discovery/simplified_engine.py`）。这两个模块全项目零引用，抓取链路统一改用 httpx
+直接请求 API，`feedparser` / `lxml` / `beautifulsoup4` 三个依赖也一并从
+`requirements.txt` 移除。
 
 ---
 

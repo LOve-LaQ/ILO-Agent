@@ -224,7 +224,7 @@ ilo-agent-demo/
 
 ### **Q: 如何扩展更多功能？**
 **A:** 
-1. 接入真实 RSS 源（GitHub/Twitter）→ 修改 `backend/src/modules/discovery/engine.py`
+1. 接入更多技术源（Hacker News / 技术博客 RSS）→ 扩展 `backend/src/modules/discovery/github_fetcher.py` 与 `article_fetcher.py`（RSS 引擎 `engine.py` 已作为死代码删除）
 2. 集成真实 LLM → 在 `state_machine.py` 中调用 OpenAI API
 3. 完善推荐算法 → 扩展 `memory_manager.py` 中的相似用户协同过滤
 
