@@ -52,6 +52,8 @@ htmlcov/
 backend/ilo/
 qdrant_data/
 .workbuddy/
+# AI 助手的工作目录（记忆 / 技能 / 临时产物），与上面的 .workbuddy/ 同类
+.workbuddy-ai/
 shots_probe.png
 
 # Local backup of development scripts & notes (see _local_backup/)
