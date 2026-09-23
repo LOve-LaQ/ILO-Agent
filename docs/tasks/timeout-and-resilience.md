@@ -148,6 +148,17 @@
 
 > **为什么 LLM 摘要的 read 给到 90s**：`summarize_items` 的 `batch_size=20`，一批 20 条要生成结构化 JSON，长是正常的。**但必须有界** —— 90s 是「最长合理时间」，不是「随便等」。
 
+> **⚠️ Qdrant 的「按次」超时必须是整数秒（实测踩过的坑）**
+> `qdrant-client` 1.19 的 REST 客户端在 `qdrant_client/http/api_client.py:96` 做的是
+> `kwargs["timeout"] = int(kwargs["params"]["timeout"])`，而该值在进入这行之前**已经被序列化成字符串**。
+> 传 `6.0` 的实际路径是 `str(6.0)` → `"6.0"` → `int("6.0")` → `ValueError: invalid literal for int()
+> with base 10: '6.0'`。异常发生在客户端构造请求时，**请求根本发不出去** —— 也就是说任何非整数超时
+> 都等价于「这次 Qdrant 调用必然失败」。实测后果：一次手动抓取 23 条新卡全部入库失败，知识库一条没多。
+>
+> 因此**按次**传 `timeout=` 时必须过 `src/core/resilience.py` 的 `qdrant_timeout_seconds()`
+> （向上取整为整数秒，下限 1）。构造期 `QdrantClient(url=..., timeout=4.0)` 走的是 httpx 自己的超时，
+> 传 float 是安全的，**不要**一并包装。回归守卫见 `tests/test_qdrant_timeout.py`（AST 静态检查 + 真实 Qdrant 集成）。
+
 **请求级总预算**（新增，从入口往下传）：
 
 | 端点 | 总预算 | 说明 |

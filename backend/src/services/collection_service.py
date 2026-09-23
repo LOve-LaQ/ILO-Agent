@@ -756,7 +756,7 @@ async def get_or_generate_content_digest(item_id: str) -> Dict[str, Any]:
 class CollectResult:
     """一次采集的结果摘要（路由与调度器共用）"""
 
-    status: str  # ok | empty | error
+    status: str  # ok | partial | error | empty
     kind: str
     batch_id: Optional[str] = None
     fetched_count: int = 0
@@ -903,6 +903,17 @@ async def collect_items(
         else:
             batch_status = "failed"
 
+        # 返回给调用方的 status 必须与批次终态是**同一个事实**。
+        # 这里原来硬编码 "ok"：23 条全部入库失败、批次已落 failed，路由却拿到
+        # status=ok 原样返回，前端于是弹出「✅ 新增 23 条」而知识库一条都没多 ——
+        # 失败被 UI 抹平了，用户只能看到「抓取成功但数量没变」，排查时还得反推。
+        # 注意 "empty" 是另一个语义（没抓到数据），由上面的早返回分支负责。
+        result_status = {
+            "succeeded": "ok",
+            "partial": "partial",
+            "failed": "error",
+        }[batch_status]
+
         finish_batch(
             batch_id,
             status=batch_status,
@@ -910,13 +921,20 @@ async def collect_items(
             new_count=len(new_items),
             skipped_count=skipped_count,
             failed_count=failed_count,
+            # 非异常路径也要留下原因：否则 failed 批次在库里只有状态没有理由，
+            # 只能去翻日志才能知道「为什么全失败了」
+            error=(
+                None
+                if failed_count == 0
+                else f"{failed_count}/{len(new_items)} 条未入库（摘要未中文化或写入失败，详见日志）"
+            ),
         )
         logger.info(
-            f"✅ 采集完成({kind})：新增 {len(new_items)} 条，跳过 {skipped_count} 条，"
-            f"失败 {failed_count} 条"
+            f"{'⚠️' if failed_count else '✅'} 采集完成({kind})：新增 {len(new_items)} 条，"
+            f"跳过 {skipped_count} 条，失败 {failed_count} 条"
         )
         return CollectResult(
-            status="ok",
+            status=result_status,
             kind=kind,
             batch_id=_sid(batch_id),
             fetched_count=fetched_count,

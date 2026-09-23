@@ -50,6 +50,12 @@ export interface paths {
          *       未登录也允许触发（demo 场景），此时批次不记操作人
          *     - limit 限定 1..100：上游翻页上限 10 页 × per_page 100，但单次请求不该任意放大，
          *       否则匿名调用方就能用一次请求把外部 API 与 LLM 成本推到上限
+         *
+         *     【当前为同步执行，长任务应改为异步队列】抓取 + 多批摘要整条链路在一次请求内
+         *     跑完，单次可能耗时几分钟。**不要**靠把超时设大来「解决」——那只是把问题推给
+         *     网关和用户。正确方向是异步化（接口立即返回 batch_id，前端轮询批次状态）；
+         *     本项目已有 collection_service 的批次表，状态机已具备，只需把执行挪到后台。
+         *     本任务未实施该改造，此处如实标注，避免后续维护者误以为这是最终形态。
          */
         post: operations["refresh_news_api_v1_discover_refresh_post"];
         delete?: never;
@@ -1873,7 +1879,7 @@ export interface components {
         RefreshResponse: {
             /**
              * Status
-             * @description ok | empty
+             * @description ok | partial | error | empty
              */
             status: string;
             /**
@@ -1886,6 +1892,12 @@ export interface components {
              * @default 0
              */
             skipped_count: number;
+            /**
+             * Failed Count
+             * @description 未入库的条数。>0 表示部分或全部新卡没能进知识库，前端必须如实提示
+             * @default 0
+             */
+            failed_count: number;
             /**
              * Total In Kb
              * @default 0

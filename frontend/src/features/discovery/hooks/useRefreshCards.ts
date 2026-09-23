@@ -10,6 +10,9 @@ import { useStagedProgress } from './useStagedProgress';
 /** 进度遮罩最短展示时长，与原 index.html 的 900ms 下限一致 */
 const MIN_OVERLAY_MS = 900;
 
+/** 失败提示的展示时长：比默认的 2.2s 长，让用户来得及读完条数 */
+const FAILURE_TOAST_MS = 6000;
+
 const REPO_STAGES = [
   '正在连接 GitHub…',
   '正在翻页抓取热门仓库…',
@@ -60,14 +63,26 @@ export function useRefreshCards(): RefreshCardsController {
 
     try {
       const result = await refreshCards(activeTab, timeRange);
-      if (result.status === 'ok') {
-        showToast(`✅ 新增 ${result.new_count ?? 0} 条，跳过 ${result.skipped_count ?? 0} 条重复`);
+      const added = result.new_count ?? 0;
+      const skipped = result.skipped_count ?? 0;
+      const failed = result.failed_count ?? 0;
+
+      // 四态如实区分。此前只判断 `status === 'ok'`，而当时后端把「全部入库失败」
+      // 也报成 ok —— 于是弹出绿色「✅ 新增 23 条」，知识库却一条没多，
+      // 用户看到的是「抓取成功但总数没变」，只能靠猜。两端都要修：后端不再谎报
+      // （见 collection_service 的 result_status），前端也不再假设 ok 就等于成功。
+      if (result.status === 'partial') {
+        showToast(`⚠️ 新增 ${added} 条，另有 ${failed} 条未能入库`, FAILURE_TOAST_MS);
+      } else if (result.status === 'error') {
+        showToast(`⚠️ ${added} 条新内容全部未能入库，请查看服务端日志`, FAILURE_TOAST_MS);
+      } else if (result.status === 'ok') {
+        showToast(`✅ 新增 ${added} 条，跳过 ${skipped} 条重复`);
       } else {
         showToast('本次没有抓到新内容');
       }
     } catch (error) {
       console.warn('抓取失败:', error);
-      showToast('⚠️ 抓取失败，已展示当前内容');
+      showToast('⚠️ 抓取失败，已展示当前内容', FAILURE_TOAST_MS);
     }
 
     await queryClient.invalidateQueries({ queryKey: cardsQueryKey(activeTab) });

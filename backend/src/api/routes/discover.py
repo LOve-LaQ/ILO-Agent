@@ -357,13 +357,18 @@ async def refresh_news(
         # 只查一次：原来日志和响应各查一次，等于白付一次 Qdrant 往返
         total_in_kb = await asyncio.to_thread(kb.count, "repo")
         logger.info(
-            f"✅ 抓取完成：新增 {result.new_count} 条，跳过 {result.skipped_count} 条，"
+            f"{'⚠️' if result.failed_count else '✅'} 抓取完成：新增 {result.new_count} 条，"
+            f"跳过 {result.skipped_count} 条，失败 {result.failed_count} 条，"
             f"知识库仓库共 {total_in_kb} 条"
         )
+        # status 必须如实透传：全部入库失败时回 "error"，前端才不会把它显示成
+        # 「新增 23 条」的绿色成功提示（这个坑真实发生过，见 collection_service
+        # 里 result_status 处的注释）。
         return {
-            "status": "ok",
+            "status": result.status,
             "new_count": result.new_count,
             "skipped_count": result.skipped_count,
+            "failed_count": result.failed_count,
             "total_in_kb": total_in_kb,
             "batch_id": result.batch_id,
         }
@@ -462,13 +467,15 @@ async def refresh_articles(
         # 同 /refresh：日志与响应共用一次查询，少一次 Qdrant 往返
         total_in_kb = await asyncio.to_thread(kb.count, "article")
         logger.info(
-            f"✅ 文章抓取完成：新增 {result.new_count} 条，跳过 {result.skipped_count} 条，"
+            f"{'⚠️' if result.failed_count else '✅'} 文章抓取完成：新增 {result.new_count} 条，"
+            f"跳过 {result.skipped_count} 条，失败 {result.failed_count} 条，"
             f"知识库文章共 {total_in_kb} 条"
         )
         return {
-            "status": "ok",
+            "status": result.status,
             "new_count": result.new_count,
             "skipped_count": result.skipped_count,
+            "failed_count": result.failed_count,
             "total_in_kb": total_in_kb,
             "batch_id": result.batch_id,
         }

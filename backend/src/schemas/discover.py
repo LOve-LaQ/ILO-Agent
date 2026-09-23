@@ -27,9 +27,13 @@ class CardListResponse(BaseModel):
 class RefreshResponse(BaseModel):
     """抓取结果响应（各降级分支字段可选，故均给默认值）"""
 
-    status: str = Field(..., description="ok | empty")
+    status: str = Field(..., description="ok | partial | error | empty")
     new_count: int = 0
     skipped_count: int = 0
+    failed_count: int = Field(
+        0,
+        description="未入库的条数。>0 表示部分或全部新卡没能进知识库，前端必须如实提示",
+    )
     total_in_kb: int = 0
     count: int = 0
     message: Optional[str] = None

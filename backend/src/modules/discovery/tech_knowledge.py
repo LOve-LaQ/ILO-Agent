@@ -36,7 +36,7 @@ from loguru import logger
 
 from src.core import circuit_breaker
 from src.core.config import settings
-from src.core.resilience import log_downstream_failure, with_retry_sync
+from src.core.resilience import log_downstream_failure, qdrant_timeout_seconds, with_retry_sync
 
 # Qdrant 客户端的「瞬时」异常：ResponseHandlingException 是底层传输层的包装
 # （httpx 连接失败 / 读超时都归到这里）。UnexpectedResponse 刻意不算 —— 那是
@@ -180,7 +180,10 @@ class TechKnowledgeBase:
         self.qdrant.upsert(
             collection_name=COLLECTION,
             points=[PointStruct(id=point_id, vector=vector, payload=payload)],
-            timeout=settings.qdrant_write_timeout,
+            # 必须过 qdrant_timeout_seconds：qdrant-client 的 REST 客户端对**按次**
+            # 传入的 timeout 做 `int(str(值))`，传 float 6.0 会直接 ValueError，
+            # 请求发不出去。详见该助手的 docstring。
+            timeout=qdrant_timeout_seconds(settings.qdrant_write_timeout),
         )
 
     # ==================== 读取 ====================

@@ -26,6 +26,7 @@
 """
 
 import asyncio
+import math
 import random
 import time
 from typing import Awaitable, Callable, Optional, Tuple, Type, TypeVar
@@ -42,6 +43,28 @@ TRANSIENT_HTTP_STATUSES = frozenset({429, 500, 502, 503, 504})
 # ConnectTimeout / ReadTimeout：WriteError、ReadError、PoolTimeout 同样是瞬时故障，
 # 逐个子类列举只会漏。它不包含 HTTPStatusError（后者要靠状态码判定）。
 RETRY_ON_NETWORK: Tuple[Type[BaseException], ...] = (httpx.TransportError, asyncio.TimeoutError)
+
+
+def qdrant_timeout_seconds(seconds: float) -> int:
+    """把秒级超时预算转成 qdrant-client 能接受的**整数秒**。
+
+    【为什么必须转换 —— 这是真实踩过的坑，别把它「优化」掉】
+    qdrant-client 1.19 的 REST 客户端在 `qdrant_client/http/api_client.py:96` 做的是
+    `kwargs["timeout"] = int(kwargs["params"]["timeout"])`，而 `params["timeout"]`
+    在进入这行之前**已经被序列化成了字符串**。于是传 `6.0` 的路径是
+    `str(6.0)` → `"6.0"` → `int("6.0")` → `ValueError: invalid literal for int()
+    with base 10: '6.0'`。异常发生在客户端构造请求时，**请求根本发不出去**，
+    所以任何非整数超时都等价于「这次 Qdrant 调用必然失败」。
+
+    这个坑只在**按次传 `timeout=`** 时出现。构造期
+    `QdrantClient(url=..., timeout=4.0)` 走的是 httpx 自己的超时，传 float 是安全的
+    —— 所以不要「顺手」把构造期也包上，那是无害且多余的。
+
+    【为什么向上取整】`int()` 会把 2.5s 截成 2s，让我们比配置的预算更早放弃。
+    宁可多等不到 1 秒，也不要擅自缩短调用方给的预算。下限取 1 而不是 0：
+    在 Qdrant 的语义里 `timeout=0` 是「不设超时」，那与「预算已耗尽」正好相反。
+    """
+    return max(1, math.ceil(seconds))
 
 
 def is_retryable(exc: BaseException) -> bool:
@@ -282,6 +305,7 @@ __all__ = [
     "is_retryable",
     "is_timeout_error",
     "log_downstream_failure",
+    "qdrant_timeout_seconds",
     "raise_if_transient",
     "with_retry",
     "with_retry_sync",

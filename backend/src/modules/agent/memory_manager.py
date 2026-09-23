@@ -35,6 +35,7 @@ from qdrant_client.models import (
 from loguru import logger
 
 from src.core.config import settings
+from src.core.resilience import qdrant_timeout_seconds
 
 
 class MemoryManager:
@@ -51,6 +52,8 @@ class MemoryManager:
         qdrant_url = config.get("qdrant_url", "http://127.0.0.1:6333")
         # 客户端取**写档**（6s）作天花板：这个客户端同时做 upsert 与检索，
         # 检索在调用点单独按读档收紧到 4s。
+        # 构造期的 timeout 传 float 是安全的（走 httpx 自己的超时），**不要**
+        # 顺手套 qdrant_timeout_seconds —— 那个助手只解决「按次传 timeout」的坑。
         self.qdrant_client = QdrantClient(
             url=qdrant_url, timeout=settings.qdrant_write_timeout
         )
@@ -237,7 +240,7 @@ class MemoryManager:
             collection_name="user_profiles",
             query=query_vector,
             limit=top_k,
-            timeout=settings.qdrant_timeout,
+            timeout=qdrant_timeout_seconds(settings.qdrant_timeout),
         )
 
         return [
@@ -293,7 +296,7 @@ class MemoryManager:
             collection_name="learning_history",
             query=query_vector,
             limit=top_k,
-            timeout=settings.qdrant_timeout,
+            timeout=qdrant_timeout_seconds(settings.qdrant_timeout),
             query_filter=Filter(
                 must=[FieldCondition(key="user_id", match=MatchValue(value=owner))]
             ),

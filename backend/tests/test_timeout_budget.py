@@ -13,7 +13,9 @@
 全部离线可复现：只构造客户端，不发请求。
 """
 
+import io
 import re
+import tokenize
 from pathlib import Path
 
 import pytest
@@ -38,22 +40,74 @@ BUDGET_KEYS = (
     "smtp_timeout",
 )
 
-# 字面量超时的模式。只在源码里扫，测试自己用的小超时不算。
-_HARDCODED_PATTERNS = (
+# 只在**代码**里扫的模式（关键字实参 / 构造函数实参）。文档字符串与注释里举的例子
+# 不算违规 —— 解释「为什么不能传 float」时必然要写 `timeout=4.0`。
+_HARDCODED_CODE_PATTERNS = (
     re.compile(r"\btimeout\s*=\s*\d"),
     re.compile(r"\bsocket_timeout\s*=\s*\d"),
     re.compile(r"\bsocket_connect_timeout\s*=\s*\d"),
     re.compile(r"\bTimeout\(\s*\d"),
-    re.compile(r"\bstatement_timeout\s*=\s*\d"),
 )
 
+# 只在**字符串**里扫的模式：PG 的 statement_timeout 只能作为连接参数写在字符串里
+# （`options="-c statement_timeout=3000"`），按代码扫永远扫不到，所以单独走原文。
+_HARDCODED_STRING_PATTERNS = (re.compile(r"\bstatement_timeout\s*=\s*\d"),)
 
-def _code_lines(path: Path):
-    """产出 (行号, 去掉注释后的代码)。注释里提到 `timeout=50` 不该算违规。"""
-    for lineno, raw in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+_SKIP_TOKEN_TYPES = {
+    tokenize.STRING,
+    tokenize.COMMENT,
+    tokenize.NL,
+    tokenize.NEWLINE,
+    tokenize.INDENT,
+    tokenize.DEDENT,
+    tokenize.ENCODING,
+    tokenize.ENDMARKER,
+}
+# Python 3.12+ 把 f-string 拆成 FSTRING_START / MIDDLE / END。MIDDLE 是字符串内容
+# （要排除），而 `{...}` 里的表达式仍是正常 token，所以 f"{timeout=30}" 这种
+# 真·硬编码照样抓得到。
+for _fstring_token in ("FSTRING_START", "FSTRING_MIDDLE", "FSTRING_END"):
+    _token_type = getattr(tokenize, _fstring_token, None)
+    if _token_type is not None:
+        _SKIP_TOKEN_TYPES.add(_token_type)
+
+
+def _code_lines(source: str):
+    """产出 (行号, 去掉注释与字符串字面量后的代码)。
+
+    用 tokenize 而不是 `raw.split("#")`：后者只挡得住注释，挡不住**文档字符串**。
+    而文档里举的例子（`timeout=4.0`）恰恰最容易被误判成硬编码 —— **误报比漏报更糟**，
+    守卫一旦开始对散文报警，就会被人当成噪声关掉，那时真正的硬编码反而没人管。
+    """
+    buckets: dict = {}
+    try:
+        for token in tokenize.generate_tokens(io.StringIO(source).readline):
+            if token.type in _SKIP_TOKEN_TYPES:
+                continue
+            buckets.setdefault(token.start[0], []).append(token.string)
+    except (tokenize.TokenError, IndentationError):
+        # 语法不完整的片段（单测里的样例）退化成「整行当代码」，宁可多报不漏报
+        buckets.clear()
+        for lineno, raw in enumerate(source.splitlines(), 1):
+            code = raw.split("#", 1)[0]
+            if code.strip():
+                buckets.setdefault(lineno, []).append(code)
+    # 注意要拼回字符串：token 之间补空格，`timeout = 30` 才能被 \s* 匹配到
+    return sorted((lineno, " ".join(parts)) for lineno, parts in buckets.items())
+
+
+def _offenders_in_source(source: str, filename: str) -> list:
+    """扫一段源码，返回违规描述列表"""
+    found = []
+    for lineno, code in _code_lines(source):
+        if any(pattern.search(code) for pattern in _HARDCODED_CODE_PATTERNS):
+            found.append(f"{filename}:{lineno}  {code.strip()}")
+
+    for lineno, raw in enumerate(source.splitlines(), 1):
         code = raw.split("#", 1)[0]
-        if code.strip():
-            yield lineno, code
+        if any(pattern.search(code) for pattern in _HARDCODED_STRING_PATTERNS):
+            found.append(f"{filename}:{lineno}  {code.strip()}")
+    return found
 
 
 # ================================================================ 静态守卫
@@ -65,12 +119,38 @@ def test_no_hardcoded_timeout_literals_in_src():
     """
     offenders = []
     for path in SRC_ROOT.rglob("*.py"):
-        for lineno, code in _code_lines(path):
-            if any(p.search(code) for p in _HARDCODED_PATTERNS):
-                rel = path.relative_to(BACKEND_ROOT)
-                offenders.append(f"{rel}:{lineno}  {code.strip()}")
+        offenders += _offenders_in_source(
+            path.read_text(encoding="utf-8"), str(path.relative_to(BACKEND_ROOT))
+        )
 
     assert not offenders, "发现硬编码超时字面量，请改为读 Settings：\n" + "\n".join(offenders)
+
+
+def test_guard_ignores_timeout_examples_in_docstrings():
+    """守卫自检：文档字符串里解释超时坑时写的示例不是违规"""
+    source = '''
+def f():
+    """构造期 QdrantClient(url=..., timeout=4.0) 是安全的；timeout=0 也不等于预算耗尽。"""
+    return None
+'''
+    assert not _offenders_in_source(source, "doc.py")
+
+
+def test_guard_ignores_timeout_examples_in_comments():
+    source = "# 这里传 timeout=30 会被守卫拦下\nx = 1\n"
+    assert not _offenders_in_source(source, "comment.py")
+
+
+def test_guard_still_detects_real_hardcoded_timeout():
+    """守卫自检的另一半：真的硬编码必须照抓"""
+    assert _offenders_in_source("client.get(url, timeout=30)\n", "bad.py")
+    assert _offenders_in_source("c = QdrantClient(url=u, timeout=4)\n", "bad.py")
+
+
+def test_guard_still_detects_hardcoded_statement_timeout_in_string():
+    """statement_timeout 只存在于字符串里，正则那条路不能被 tokenize 优化掉"""
+    source = 'connect_args = {"options": "-c statement_timeout=3000"}\n'
+    assert _offenders_in_source(source, "bad.py")
 
 
 def test_budget_settings_exist_and_are_positive():
