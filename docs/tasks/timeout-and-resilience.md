@@ -560,3 +560,91 @@ SMTP_TIMEOUT=10.0
   在 `api/routes/learning.py` 里是**硬编码**的（`{"max_tokens": 4096, "num_questions": 3}`），
   看起来更像是「该接线却忘了接线」而不是「该删的废字段」——
   正确的修法是让那两个值读 Settings，而不是删掉配置项。
+
+---
+
+## 八、独立核验结果（第三方复测，2026-09-23）
+
+> 本节由**未参与实施**的一方复测，不采信第七节的自测数字。所有结论均来自重新执行的命令与探针。
+
+### 8.1 静态核验（全部通过）
+
+| 检查项 | 命令 | 结果 |
+|---|---|---|
+| LLM 客户端超时覆盖 | `grep -rn "ChatOpenAI(" src/` | 6 处构造，**6 个 `timeout=` + 6 个 `max_retries=0`** ✅ |
+| 事件循环卸载 | `grep -rn "\.invoke(" src/` | 4 个调用点**全部** `await asyncio.to_thread(..., timeout=...)` ✅ |
+| 历史 bug 未回归 | `grep -n "async def generate" src/modules/agent/state_machine.py` | 仍是 `async def`，调用方仍 `await` ✅ |
+| 遗留依赖 | `grep -n tenacity requirements.txt` | 已移除 ✅ |
+| 全量测试 | `pytest -q` | **251 passed, 2 deselected**（eval 门禁按契约跳过）✅ |
+| 新增测试 | `pytest tests/test_{deadline,circuit_breaker,resilience,timeout_budget}.py` | **81 passed** ✅ |
+| 配置落地 | `git show 683a9ee -- .env.example` | 19 个新键（3 LLM + 5 deadline + 2 熔断 + 9 超时）全部进 `.env.example` 与 Settings ✅ |
+
+### 8.2 行为核验（独立探针，用「永不响应的本地假上游」逼出超时）
+
+| 验证项 | 期望 | 实测 | 判定 |
+|---|---|---|---|
+| 构造期 `timeout=2` 生效 | ≈2s 失败 | `APITimeoutError` @ **2.05s** | ✅ |
+| **按次传 `timeout=2` 生效** | ≈2s 失败 | `APITimeoutError` @ **2.01s** | ✅ |
+| **LLM 调用期间事件循环不被阻塞** | 心跳不中断 | LLM 调用 **50.02s** 期间，最大卡顿 **38ms**，心跳 **1614** 次 | ✅ |
+| deadline 预算 5s | ≈5s 返回降级 | **5.10s** 返回降级文案 | ✅ |
+| deadline 预算 0 | 立即降级、不发起调用 | **0.002s**，未撞下游 | ✅ |
+| 熔断（阈值 3） | 前 3 次撞下游，之后短路 | 第 1~3 次 2.01/2.02/2.02s 且撞下游；第 4~6 次 **0.00s 且不撞下游** | ✅ |
+
+**关于「按次传 `timeout`」这一项的意义**：实施说明里提到「langchain 的 `ChatOpenAI` 支持按次传超时」。
+这是本方案的关键技术依赖 —— 若该假设不成立，`clamp_timeout` 算出的动态预算就完全无效，
+全部退化为「客户端构造期的固定超时」。本项已独立证实成立，**该假设可以放心依赖**。
+
+**关于事件循环的量化意义**：修复前，一次 LLM 调用会独占事件循环，最大卡顿 ≈ 调用总耗时（本例为 50000ms 量级）。
+修复后最大卡顿 **38ms**（仅为 asyncio 调度粒度 + GC），**改善了约 1300 倍**。这是本任务的核心收益。
+
+### 8.3 观测事件核验（Phase 4 交付物）
+
+探针运行期间实际落地的结构化事件（日志原文）：
+
+```
+event=downstream_timeout  downstream=llm_chat scope=explanation elapsed_ms=50006 timeout_s=50.0
+event=downstream_fallback downstream=llm_chat scope=explanation reason=timeout elapsed_ms=50006
+event=downstream_retry_exhausted downstream=... attempts=... reason=...
+event=circuit_open downstream=llm_chat failures=3 open_seconds=30
+event=circuit_open downstream=llm_chat action=fallback scope=explanation
+```
+
+四类事件（`downstream_timeout` / `downstream_retry*` / `downstream_fallback` / `circuit_open`）均按设计触发 ✅
+
+### 8.4 ⚠️ 复测新发现：`/discover/news` 仍有同步阻塞（本次未修）
+
+**这是第三方复测发现的、原规格与实施都未覆盖的问题。**
+
+完整调用链（全部为同步，且**没有任何 `to_thread`**）：
+
+```
+async def get_recommended_news        (api/routes/discover.py:195)
+  └─ _personalized_items(...)          (api/routes/discover.py:157)  ← 同步 def，非 async
+       ├─ build_user_profile(...)      (services/interest_profile.py:276)  ← 同步
+       │    └─ get_vectors_by_ids(...) (modules/discovery/tech_knowledge.py:306)  ← 同步
+       │         └─ with_retry_sync(...)                                    ← time.sleep(0.3) 重试
+       └─ kb.candidate_points(...)     (modules/discovery/tech_knowledge.py:226)  ← 同步 Qdrant 调用
+```
+
+`grep -n "to_thread" api/routes/discover.py` → **零命中**。
+
+**影响**：与 P0-2 是同一类问题（async 路由里做同步 IO），只是量级更小 ——
+单次约 0.1~1s（DB 查询 + Qdrant scroll），若触发重试再叠加 ~0.3~0.45s 的 `time.sleep`。
+它不会像 LLM 那样阻塞几十秒，但 `/discover/news` 是首页接口、QPS 最高，**阻塞会直接体现为并发下的 P95 劣化**。
+
+**责任归属（如实记录）**：这是**本任务书 Phase 1.2 的范围缺口** ——
+该节的表格只列了 2 个 LLM 调用点，没有覆盖「非 LLM 的同步 IO 也在 async 路由里」这一类。
+实施方按规格执行，无过失。
+
+**建议修法（Phase 5 候选）**：
+1. 把 `_personalized_items` 改为 `async def`，内部用 `await asyncio.to_thread(build_user_profile, ...)`；
+2. `candidate_points` 同理；
+3. 或更彻底：`/discover/news` 的整体数据获取（含 `kb.sample`）统一走 `to_thread`；
+4. 加一条与 `test_timeout_budget.py` 同风格的**静态守卫**：扫描 `api/routes/*.py`，
+   在 `async def` 内出现的已知同步 IO 调用（`build_user_profile` / `candidate_points` /
+   `get_vectors_by_ids` / `\.scroll(` / `\.sample(`）直接判失败 —— 把「别在 async 里同步 IO」
+   变成可回归约束，而不是靠人记得。
+
+> **通用教训**：这次修的是「LLM 调用阻塞事件循环」，但同类问题在项目里**不止 LLM 一处**。
+> 只按「LLM 调用点」这个维度去搜，必然会漏掉同步的 DB / 向量库 / 文件 IO。
+> 正确的搜索维度是「**`async def` 函数体内出现了哪些同步 IO 调用**」，而不是「哪些地方调了 LLM」。
