@@ -71,3 +71,13 @@ _local_backup/
 /STEP4_COMPLETE.md
 /demo_script.md
 /frontend/README.md
+
+# 个人求职材料（公开仓库不得包含）
+/docs/interview/
+/docs/*.docx
+/docs/简历改写-*.md
+/docs/技术选型与困难故事.md
+/COMMIT_PLAN.md
+
+# 评测过程产物（可由 build_retrieval_cases.py --dump 重新生成）
+/backend/retrieval_worksheet.md
