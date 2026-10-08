@@ -1,0 +1,234 @@
+{
+  "_comment": "草稿：query 是中文问题；excerpt 是从工作单题面里原样复制的答案原句（必须唯一）。跑 --resolve 会把它定位成字符区间。negatives 是语料外的问题，用来量拒答。",
+  "negatives": [
+    { "query": "今天北京的天气怎么样", "why": "天气，语料里只有 GitHub README" },
+    { "query": "红烧肉怎么做才好吃", "why": "菜谱" },
+    { "query": "感冒了应该吃什么药", "why": "医疗" },
+    { "query": "帮我写一首关于秋天的七言绝句", "why": "创作，无检索需求" },
+    { "query": "2026 年世界杯冠军是哪支球队", "why": "时事体育" },
+    { "query": "明天上海到杭州的高铁还有票吗", "why": "出行购票" },
+    { "query": "推荐几部好看的科幻电影", "why": "影视推荐" },
+    { "query": "我的猫最近不吃东西怎么办", "why": "宠物" },
+    { "query": "个人所得税年度汇算怎么申报", "why": "税务" },
+    { "query": "附近有哪些评价好的川菜馆", "why": "本地生活" }
+  ],
+  "cases": [
+    {
+      "card_id": "gh-1376970259",
+      "query": "AirCard-iOS 的 ipa 包可以用哪些工具侧载安装？",
+      "excerpt": "Install `AirCard-iOS.ipa` using your preferred sideloading method:",
+      "difficulty": "detail"
+    },
+    {
+      "card_id": "gh-1349351409",
+      "query": "beamer2pptx 如果检测不到 PowerPoint，产物会被标成什么？",
+      "excerpt": "the result is labeled an **unverified draft**",
+      "difficulty": "detail"
+    },
+    {
+      "card_id": "gh-1355626333",
+      "query": "Lantunnel 仓库里的 crates/tp-* 目录放的是什么？",
+      "excerpt": "Shared implementation — protocol, transports, proxies, P2P, gateway and client engines.",
+      "difficulty": "detail"
+    },
+    {
+      "card_id": "gh-1360409178",
+      "query": "design-studio-ai 的 ENCRYPTION_KEY 改了会有什么后果？",
+      "excerpt": "Keep the key with your deployment secrets; changing it prevents decryption of existing provider keys.",
+      "difficulty": "detail"
+    },
+    {
+      "card_id": "gh-1377115777",
+      "query": "openJev-verdict-2.0 为什么要把概率拆成两个 head？",
+      "excerpt": "openJev-verdict-2.0 decouples these into dual heads:",
+      "difficulty": "overview"
+    },
+    {
+      "card_id": "gh-1367831669",
+      "query": "Ambient 的 Eco 模式对视频播放的分辨率和帧率上限是多少？",
+      "excerpt": "| Eco | Optional HEVC copy, up to 1280-pixel long edge / 24 fps |",
+      "difficulty": "detail"
+    },
+    {
+      "card_id": "gh-1345887853",
+      "query": "VI-Translate 默认把文档翻译成哪种语言？",
+      "excerpt": "Ứng dụng mặc định dịch sang **Tiếng Việt**.",
+      "lang_pair": "zh_query_vi_doc",
+      "difficulty": "detail"
+    },
+    {
+      "card_id": "gh-1356960006",
+      "query": "thesys-core 本地部署需要什么版本的 Python 和 Node？",
+      "excerpt": "Needs Python 3.11+, Node.js 20+, and an OpenAI API key",
+      "difficulty": "detail"
+    },
+    {
+      "card_id": "gh-1345723168",
+      "query": "Recuris 为什么在 agent 本身用开源模型时，仍然必须配置 OpenAI 兼容端点？",
+      "excerpt": "simulator and an LLM assertion judge, and both stay pinned to a reference model.",
+      "difficulty": "detail"
+    },
+    {
+      "card_id": "gh-1366915122",
+      "query": "xcertplay 目前已经在哪些设备上测试过？",
+      "excerpt": "It has been tested on car head units and phones.",
+      "difficulty": "detail"
+    },
+    {
+      "card_id": "gh-1375631360",
+      "query": "nimble 的 verify_dataset 怎么防止训练集和评测集出现数据泄漏？",
+      "excerpt": "appears in both the training set and the evaluation set.",
+      "difficulty": "detail"
+    },
+    {
+      "card_id": "gh-1364592719",
+      "query": "fly-wirehead 里按 P 键会发生什么？",
+      "excerpt": "| P | Apply a 200 ms current pulse to the 15 PAM11 dopamine cells |",
+      "difficulty": "detail"
+    },
+    {
+      "card_id": "gh-1362275185",
+      "query": "OmniStudio 侧栏内置了哪五个示例场景？",
+      "excerpt": "侧栏五个中英双语示例（工单分派 / 简历评分 / 内容护栏 / 检索重排 / 意图路由）",
+      "difficulty": "detail"
+    },
+    {
+      "card_id": "gh-1354165808",
+      "query": "Ryza Chat 打包构建时，什么情况下会被直接中止？",
+      "excerpt": "a non-zero exit aborts desktop and APK builds when a secret-shaped token or machine-local path would be included.",
+      "difficulty": "detail"
+    },
+    {
+      "card_id": "gh-1346522788",
+      "query": "SmartCV 后端为什么用 8600 端口而不是 8000？",
+      "excerpt": "端口 8600（8000 在 Windows 预留端口段里）",
+      "difficulty": "detail"
+    },
+    {
+      "card_id": "gh-1360961053",
+      "query": "motion-web 用什么工具做自动化验证？一共验证几个用例？",
+      "excerpt": "Verify all 7 cases with Playwright headless oracles:",
+      "difficulty": "detail"
+    },
+    {
+      "card_id": "gh-1357905477",
+      "query": "SimdPaddleOCR 的核心包会自动下载模型吗？",
+      "excerpt": "核心不下载模型。使用本地 DET、CLS、REC 和字典文件时：",
+      "difficulty": "detail"
+    },
+    {
+      "card_id": "gh-1367109038",
+      "query": "DuoFold 默认会不会响应手机的上下倾斜（前后方向）？",
+      "excerpt": "默认响应左右翻转；开启“Z 轴感应 · 前后倾斜”后，同时响应前后方向",
+      "difficulty": "detail"
+    },
+    {
+      "card_id": "gh-1347280587",
+      "query": "QuickScan 的默认全局快捷键是什么？",
+      "excerpt": "press `Ctrl+Alt+Q` (default hotkey) to summon the widget",
+      "difficulty": "detail"
+    },
+    {
+      "card_id": "gh-1350046847",
+      "query": "这个 UE4 逆向分析平台里，远程函数调用推荐用哪个版本？",
+      "excerpt": "| **远程函数调用** | `callRemoteFunction` / `callRemoteFunctionBatch` | ptrace 注入调用，推荐 Batch 无状态版 |",
+      "difficulty": "detail"
+    },
+    {
+      "card_id": "gh-1359221896",
+      "query": "huashu-mac-use 里命令退出码 2 代表什么？",
+      "excerpt": "退出码三态：0 成功 / 1 失败 / 2 拒绝或未知，**2 永远不算成功**。",
+      "difficulty": "detail"
+    },
+    {
+      "card_id": "gh-1350323171",
+      "query": "这份科研入门指南主要是写给哪些人看的？",
+      "excerpt": "刚进入实验室或课题组的本科生、硕士生、博士生",
+      "difficulty": "overview"
+    },
+    {
+      "card_id": "gh-1362678258",
+      "query": "TridentVision 里哪个预训练权重是不入 git 树、随 Release 分发的？",
+      "excerpt": "| yolo26m.pt 预训练权重 | AGPL-3.0 | 不入 git 树，随 Release 附件分发 |",
+      "difficulty": "detail"
+    },
+    {
+      "card_id": "gh-1366969284",
+      "query": "workbuddy2api-panel 的 login.sh 用的是哪种 OAuth 授权流程？",
+      "excerpt": "全程无 PKCE（state 由服务端签发）",
+      "difficulty": "detail"
+    },
+    {
+      "card_id": "gh-1360813538",
+      "query": "note-bridge-desktop 迁移笔记时会不会删掉来源云端的内容？",
+      "excerpt": "> 迁移向目标云端**新增**笔记，保留来源。",
+      "difficulty": "detail"
+    },
+    {
+      "card_id": "gh-1361553449",
+      "query": "果到雷达里「不支持取货」对应 Apple 的哪个返回？为什么不能当成无货？",
+      "excerpt": "| 不支持取货 | 石板灰 | Apple 返回 `ineligible`，当前商品或购买组合不适用取货服务",
+      "difficulty": "detail"
+    },
+    {
+      "card_id": "gh-1352223257",
+      "query": "易创（easy-writing）里哪个功能完全不需要配置就能用？",
+      "excerpt": "装好打开，「新建作品」写书名建书，直接开写——写作功能不需要任何配置。",
+      "difficulty": "detail"
+    },
+    {
+      "card_id": "gh-1351417776",
+      "query": "ontology-driven-dev 的演示系统默认账号密码是什么？",
+      "excerpt": "**默认账号**：`admin / admin123`（详见 `techbase/README.md`）。",
+      "difficulty": "detail"
+    },
+    {
+      "card_id": "gh-1372455596",
+      "query": "这份 CSAPP 中文资料里的练习题答案是谁提供的？",
+      "excerpt": "答案部分是原书提供的**练习题答案**，不包含自行编写的家庭作业解答或实验解答。",
+      "difficulty": "detail"
+    },
+    {
+      "card_id": "gh-1366032081",
+      "query": "Meme雷达默认每轮最多深度审计几个代币？",
+      "excerpt": "默认每轮最多深审 6 个币，并受时间预算限制。",
+      "difficulty": "detail"
+    },
+    {
+      "card_id": "gh-1377868587",
+      "query": "EmbodiedJev 的「逐步 XYZ 规划」里，模型每轮从哪些动作中选择？",
+      "excerpt": "每轮由模型从 ±X/Y/Z 的 40、10、2 mm 短步，以及开爪、闭爪、保持中选择",
+      "difficulty": "detail"
+    },
+    {
+      "card_id": "gh-1371300806",
+      "query": "VpsCT 里把服务器资源分享给别人时，对方需要拿到面板管理员账户吗？",
+      "excerpt": "使用者通过分享链接访问资源，无需获得面板管理员账户。",
+      "difficulty": "detail"
+    },
+    {
+      "card_id": "gh-1360234174",
+      "query": "gpt6-prompt-writer 里的「指令冲突」需要区分哪几类约束？",
+      "excerpt": "**指令冲突**：区分用户目标、技能建议和平台系统/开发者约束。",
+      "difficulty": "detail"
+    },
+    {
+      "card_id": "gh-1353072228",
+      "query": "OntiCards 兼容哪些大模型？",
+      "excerpt": "配置LLM大模型（兼容GPT、Claude、通义千问、DeepSeek、智谱、本地Ollama模型）",
+      "difficulty": "detail"
+    },
+    {
+      "card_id": "gh-1367131646",
+      "query": "workbuddy2api-hub v1.5.4 为什么要把「消耗积分」的统计口径统一？",
+      "excerpt": "同一页面上两个都叫「消耗积分」的数字永远对不上",
+      "difficulty": "detail"
+    },
+    {
+      "card_id": "gh-1346858216",
+      "query": "huashu-chrome 的驾驶舱会不会显示 agent 输入的内容？",
+      "excerpt": "驾驶舱上会打出 agent 刚做的动作（「点击 e12」）和最近的时间线，但**绝不显示输入的内容**",
+      "difficulty": "detail"
+    }
+  ]
+}

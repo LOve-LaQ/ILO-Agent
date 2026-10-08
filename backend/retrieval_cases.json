@@ -1,0 +1,763 @@
+{
+  "version": 1,
+  "created": "2026-10-08",
+  "chunker": {
+    "max_chars": 2000,
+    "overlap_ratio": 0.15,
+    "min_chars": 100
+  },
+  "labeling": {
+    "method": "agent-grounded",
+    "by": "coding agent（阅读真实原文后出题，答案锚定原文字符区间）",
+    "not_human": true,
+    "caveat": "问题按真实段落写出、答案区间由脚本唯一定位，但**不是独立第三方人工标注**。命中率应视为**乐观上界**：出题者读过原文，可能无意识地把问题写得更贴近原文用词。它足够支撑**策略间对照**（按标题切 vs 固定长度），不足以宣称绝对水平。",
+    "negatives": "负样本是**语料外的常识问题**（天气 / 菜谱 / 电影…）。它们没有答案区间，正确行为是 best_score 低于阈值、一条都不返回。用来量「该拒答时会不会乱答」。"
+  },
+  "metrics": {
+    "hit@k": "前 k 条命中里，存在一个块的区间**完整包含** answer_span",
+    "recall@k": "前 k 条命中的区间并集覆盖 answer_span 的比例",
+    "mrr": "第一个包含答案的命中所在名次的倒数",
+    "false_accept": "负样本的 best_score >= 阈值 —— 本该拒答却给了资料"
+  },
+  "cases": [
+    {
+      "id": "c001",
+      "kind": "positive",
+      "query": "AirCard-iOS 的 ipa 包可以用哪些工具侧载安装？",
+      "card_id": "gh-1376970259",
+      "repo": "Mak5er/AirCard-iOS",
+      "lang_pair": "zh_query_en_doc",
+      "difficulty": "detail",
+      "answer_span": [
+        3379,
+        3445
+      ],
+      "answer_excerpt": "Install `AirCard-iOS.ipa` using your preferred sideloading method:",
+      "covering_chunk_ordinals": [
+        4,
+        5
+      ],
+      "note": ""
+    },
+    {
+      "id": "c002",
+      "kind": "positive",
+      "query": "beamer2pptx 如果检测不到 PowerPoint，产物会被标成什么？",
+      "card_id": "gh-1349351409",
+      "repo": "xdmlxdml/beamer2pptx",
+      "lang_pair": "zh_query_en_doc",
+      "difficulty": "detail",
+      "answer_span": [
+        3599,
+        3644
+      ],
+      "answer_excerpt": "the result is labeled an **unverified draft**",
+      "covering_chunk_ordinals": [
+        3,
+        4
+      ],
+      "note": ""
+    },
+    {
+      "id": "c003",
+      "kind": "positive",
+      "query": "Lantunnel 仓库里的 crates/tp-* 目录放的是什么？",
+      "card_id": "gh-1355626333",
+      "repo": "lantunnel/lantunnel",
+      "lang_pair": "zh_query_en_doc",
+      "difficulty": "detail",
+      "answer_span": [
+        13699,
+        13786
+      ],
+      "answer_excerpt": "Shared implementation — protocol, transports, proxies, P2P, gateway and client engines.",
+      "covering_chunk_ordinals": [
+        11
+      ],
+      "note": ""
+    },
+    {
+      "id": "c004",
+      "kind": "positive",
+      "query": "design-studio-ai 的 ENCRYPTION_KEY 改了会有什么后果？",
+      "card_id": "gh-1360409178",
+      "repo": "bestagentkits/design-studio-ai",
+      "lang_pair": "zh_query_en_doc",
+      "difficulty": "detail",
+      "answer_span": [
+        4005,
+        4106
+      ],
+      "answer_excerpt": "Keep the key with your deployment secrets; changing it prevents decryption of existing provider keys.",
+      "covering_chunk_ordinals": [
+        4
+      ],
+      "note": ""
+    },
+    {
+      "id": "c005",
+      "kind": "positive",
+      "query": "openJev-verdict-2.0 为什么要把概率拆成两个 head？",
+      "card_id": "gh-1377115777",
+      "repo": "Heman10x-NGU/openJev-verdict-2.0",
+      "lang_pair": "zh_query_en_doc",
+      "difficulty": "overview",
+      "answer_span": [
+        7856,
+        7908
+      ],
+      "answer_excerpt": "openJev-verdict-2.0 decouples these into dual heads:",
+      "covering_chunk_ordinals": [
+        7
+      ],
+      "note": ""
+    },
+    {
+      "id": "c006",
+      "kind": "positive",
+      "query": "Ambient 的 Eco 模式对视频播放的分辨率和帧率上限是多少？",
+      "card_id": "gh-1367831669",
+      "repo": "Claude-Reverser/Ambient",
+      "lang_pair": "zh_query_en_doc",
+      "difficulty": "detail",
+      "answer_span": [
+        2842,
+        2907
+      ],
+      "answer_excerpt": "| Eco | Optional HEVC copy, up to 1280-pixel long edge / 24 fps |",
+      "covering_chunk_ordinals": [
+        3
+      ],
+      "note": ""
+    },
+    {
+      "id": "c007",
+      "kind": "positive",
+      "query": "VI-Translate 默认把文档翻译成哪种语言？",
+      "card_id": "gh-1345887853",
+      "repo": "breslee1707/VI-Translate",
+      "lang_pair": "zh_query_vi_doc",
+      "difficulty": "detail",
+      "answer_span": [
+        7775,
+        7818
+      ],
+      "answer_excerpt": "Ứng dụng mặc định dịch sang **Tiếng Việt**.",
+      "covering_chunk_ordinals": [
+        7
+      ],
+      "note": ""
+    },
+    {
+      "id": "c008",
+      "kind": "positive",
+      "query": "thesys-core 本地部署需要什么版本的 Python 和 Node？",
+      "card_id": "gh-1356960006",
+      "repo": "Sreehari05055/thesys-core",
+      "lang_pair": "zh_query_en_doc",
+      "difficulty": "detail",
+      "answer_span": [
+        3085,
+        3139
+      ],
+      "answer_excerpt": "Needs Python 3.11+, Node.js 20+, and an OpenAI API key",
+      "covering_chunk_ordinals": [
+        3
+      ],
+      "note": ""
+    },
+    {
+      "id": "c009",
+      "kind": "positive",
+      "query": "Recuris 为什么在 agent 本身用开源模型时，仍然必须配置 OpenAI 兼容端点？",
+      "card_id": "gh-1345723168",
+      "repo": "Gen-Verse/Recuris",
+      "lang_pair": "zh_query_en_doc",
+      "difficulty": "detail",
+      "answer_span": [
+        9467,
+        9547
+      ],
+      "answer_excerpt": "simulator and an LLM assertion judge, and both stay pinned to a reference model.",
+      "covering_chunk_ordinals": [
+        7,
+        8
+      ],
+      "note": ""
+    },
+    {
+      "id": "c010",
+      "kind": "positive",
+      "query": "xcertplay 目前已经在哪些设备上测试过？",
+      "card_id": "gh-1366915122",
+      "repo": "shilapi/xcertplay",
+      "lang_pair": "zh_query_en_doc",
+      "difficulty": "detail",
+      "answer_span": [
+        1723,
+        1771
+      ],
+      "answer_excerpt": "It has been tested on car head units and phones.",
+      "covering_chunk_ordinals": [
+        4
+      ],
+      "note": ""
+    },
+    {
+      "id": "c011",
+      "kind": "positive",
+      "query": "nimble 的 verify_dataset 怎么防止训练集和评测集出现数据泄漏？",
+      "card_id": "gh-1375631360",
+      "repo": "bespokelabsai/nimble",
+      "lang_pair": "zh_query_en_doc",
+      "difficulty": "detail",
+      "answer_span": [
+        20218,
+        20274
+      ],
+      "answer_excerpt": "appears in both the training set and the evaluation set.",
+      "covering_chunk_ordinals": [
+        16,
+        17
+      ],
+      "note": ""
+    },
+    {
+      "id": "c012",
+      "kind": "positive",
+      "query": "fly-wirehead 里按 P 键会发生什么？",
+      "card_id": "gh-1364592719",
+      "repo": "mattyhempstead/fly-wirehead",
+      "lang_pair": "zh_query_en_doc",
+      "difficulty": "detail",
+      "answer_span": [
+        5032,
+        5099
+      ],
+      "answer_excerpt": "| P | Apply a 200 ms current pulse to the 15 PAM11 dopamine cells |",
+      "covering_chunk_ordinals": [
+        5
+      ],
+      "note": ""
+    },
+    {
+      "id": "c013",
+      "kind": "positive",
+      "query": "OmniStudio 侧栏内置了哪五个示例场景？",
+      "card_id": "gh-1362275185",
+      "repo": "kunpengtalk/OmniStudio",
+      "lang_pair": "zh_query_mixed_doc",
+      "difficulty": "detail",
+      "answer_span": [
+        3369,
+        3413
+      ],
+      "answer_excerpt": "侧栏五个中英双语示例（工单分派 / 简历评分 / 内容护栏 / 检索重排 / 意图路由）",
+      "covering_chunk_ordinals": [
+        6,
+        7
+      ],
+      "note": ""
+    },
+    {
+      "id": "c014",
+      "kind": "positive",
+      "query": "Ryza Chat 打包构建时，什么情况下会被直接中止？",
+      "card_id": "gh-1354165808",
+      "repo": "zeroa234/ryza-ai-revive",
+      "lang_pair": "zh_query_mixed_doc",
+      "difficulty": "detail",
+      "answer_span": [
+        3240,
+        3353
+      ],
+      "answer_excerpt": "a non-zero exit aborts desktop and APK builds when a secret-shaped token or machine-local path would be included.",
+      "covering_chunk_ordinals": [
+        4,
+        5
+      ],
+      "note": ""
+    },
+    {
+      "id": "c015",
+      "kind": "positive",
+      "query": "SmartCV 后端为什么用 8600 端口而不是 8000？",
+      "card_id": "gh-1346522788",
+      "repo": "yy549159265/SmartCV",
+      "lang_pair": "zh_query_mixed_doc",
+      "difficulty": "detail",
+      "answer_span": [
+        3303,
+        3333
+      ],
+      "answer_excerpt": "端口 8600（8000 在 Windows 预留端口段里）",
+      "covering_chunk_ordinals": [
+        4,
+        5
+      ],
+      "note": ""
+    },
+    {
+      "id": "c016",
+      "kind": "positive",
+      "query": "motion-web 用什么工具做自动化验证？一共验证几个用例？",
+      "card_id": "gh-1360961053",
+      "repo": "feitangyuan/motion-web",
+      "lang_pair": "zh_query_mixed_doc",
+      "difficulty": "detail",
+      "answer_span": [
+        4576,
+        4628
+      ],
+      "answer_excerpt": "Verify all 7 cases with Playwright headless oracles:",
+      "covering_chunk_ordinals": [
+        7
+      ],
+      "note": ""
+    },
+    {
+      "id": "c017",
+      "kind": "positive",
+      "query": "SimdPaddleOCR 的核心包会自动下载模型吗？",
+      "card_id": "gh-1357905477",
+      "repo": "sdcb/SimdPaddleOCR",
+      "lang_pair": "zh_query_mixed_doc",
+      "difficulty": "detail",
+      "answer_span": [
+        6906,
+        6938
+      ],
+      "answer_excerpt": "核心不下载模型。使用本地 DET、CLS、REC 和字典文件时：",
+      "covering_chunk_ordinals": [
+        9
+      ],
+      "note": ""
+    },
+    {
+      "id": "c018",
+      "kind": "positive",
+      "query": "DuoFold 默认会不会响应手机的上下倾斜（前后方向）？",
+      "card_id": "gh-1367109038",
+      "repo": "jcx396905-gif/DuoFold-Android",
+      "lang_pair": "zh_query_mixed_doc",
+      "difficulty": "detail",
+      "answer_span": [
+        11445,
+        11480
+      ],
+      "answer_excerpt": "默认响应左右翻转；开启“Z 轴感应 · 前后倾斜”后，同时响应前后方向",
+      "covering_chunk_ordinals": [
+        18,
+        19
+      ],
+      "note": ""
+    },
+    {
+      "id": "c019",
+      "kind": "positive",
+      "query": "QuickScan 的默认全局快捷键是什么？",
+      "card_id": "gh-1347280587",
+      "repo": "yoli-mi/quickscan",
+      "lang_pair": "zh_query_mixed_doc",
+      "difficulty": "detail",
+      "answer_span": [
+        1447,
+        1503
+      ],
+      "answer_excerpt": "press `Ctrl+Alt+Q` (default hotkey) to summon the widget",
+      "covering_chunk_ordinals": [
+        7
+      ],
+      "note": ""
+    },
+    {
+      "id": "c020",
+      "kind": "positive",
+      "query": "这个 UE4 逆向分析平台里，远程函数调用推荐用哪个版本？",
+      "card_id": "gh-1350046847",
+      "repo": "tearhacker/UE4Dump_imGui_AnalyseToolsForMCP",
+      "lang_pair": "zh_query_mixed_doc",
+      "difficulty": "detail",
+      "answer_span": [
+        2279,
+        2372
+      ],
+      "answer_excerpt": "| **远程函数调用** | `callRemoteFunction` / `callRemoteFunctionBatch` | ptrace 注入调用，推荐 Batch 无状态版 |",
+      "covering_chunk_ordinals": [
+        4
+      ],
+      "note": ""
+    },
+    {
+      "id": "c021",
+      "kind": "positive",
+      "query": "huashu-mac-use 里命令退出码 2 代表什么？",
+      "card_id": "gh-1359221896",
+      "repo": "alchaincyf/huashu-mac-use",
+      "lang_pair": "zh_query_mixed_doc",
+      "difficulty": "detail",
+      "answer_span": [
+        5678,
+        5719
+      ],
+      "answer_excerpt": "退出码三态：0 成功 / 1 失败 / 2 拒绝或未知，**2 永远不算成功**。",
+      "covering_chunk_ordinals": [
+        4,
+        5
+      ],
+      "note": ""
+    },
+    {
+      "id": "c022",
+      "kind": "positive",
+      "query": "这份科研入门指南主要是写给哪些人看的？",
+      "card_id": "gh-1350323171",
+      "repo": "LAMDA-NeSy/Research-Starter-Kit",
+      "lang_pair": "zh_query_mixed_doc",
+      "difficulty": "overview",
+      "answer_span": [
+        1129,
+        1151
+      ],
+      "answer_excerpt": "刚进入实验室或课题组的本科生、硕士生、博士生",
+      "covering_chunk_ordinals": [
+        2,
+        3
+      ],
+      "note": ""
+    },
+    {
+      "id": "c023",
+      "kind": "positive",
+      "query": "TridentVision 里哪个预训练权重是不入 git 树、随 Release 分发的？",
+      "card_id": "gh-1362678258",
+      "repo": "fromgof/TridentVision",
+      "lang_pair": "zh_query_mixed_doc",
+      "difficulty": "detail",
+      "answer_span": [
+        9137,
+        9194
+      ],
+      "answer_excerpt": "| yolo26m.pt 预训练权重 | AGPL-3.0 | 不入 git 树，随 Release 附件分发 |",
+      "covering_chunk_ordinals": [
+        12,
+        13
+      ],
+      "note": ""
+    },
+    {
+      "id": "c024",
+      "kind": "positive",
+      "query": "workbuddy2api-panel 的 login.sh 用的是哪种 OAuth 授权流程？",
+      "card_id": "gh-1366969284",
+      "repo": "linguo2625469/workbuddy2api-panel",
+      "lang_pair": "zh_query_mixed_doc",
+      "difficulty": "detail",
+      "answer_span": [
+        11658,
+        11680
+      ],
+      "answer_excerpt": "全程无 PKCE（state 由服务端签发）",
+      "covering_chunk_ordinals": [
+        17,
+        18
+      ],
+      "note": ""
+    },
+    {
+      "id": "c025",
+      "kind": "positive",
+      "query": "note-bridge-desktop 迁移笔记时会不会删掉来源云端的内容？",
+      "card_id": "gh-1360813538",
+      "repo": "lingxuanqjc-alt/note-bridge-desktop",
+      "lang_pair": "zh_query_zh_doc",
+      "difficulty": "detail",
+      "answer_span": [
+        3659,
+        3682
+      ],
+      "answer_excerpt": "> 迁移向目标云端**新增**笔记，保留来源。",
+      "covering_chunk_ordinals": [
+        5
+      ],
+      "note": ""
+    },
+    {
+      "id": "c026",
+      "kind": "positive",
+      "query": "果到雷达里「不支持取货」对应 Apple 的哪个返回？为什么不能当成无货？",
+      "card_id": "gh-1361553449",
+      "repo": "suversal/apple-store-inventory-monitor",
+      "lang_pair": "zh_query_zh_doc",
+      "difficulty": "detail",
+      "answer_span": [
+        8922,
+        8976
+      ],
+      "answer_excerpt": "| 不支持取货 | 石板灰 | Apple 返回 `ineligible`，当前商品或购买组合不适用取货服务",
+      "covering_chunk_ordinals": [
+        15
+      ],
+      "note": ""
+    },
+    {
+      "id": "c027",
+      "kind": "positive",
+      "query": "易创（easy-writing）里哪个功能完全不需要配置就能用？",
+      "card_id": "gh-1352223257",
+      "repo": "yilujian/easy-writing",
+      "lang_pair": "zh_query_zh_doc",
+      "difficulty": "detail",
+      "answer_span": [
+        2498,
+        2533
+      ],
+      "answer_excerpt": "装好打开，「新建作品」写书名建书，直接开写——写作功能不需要任何配置。",
+      "covering_chunk_ordinals": [
+        6,
+        7
+      ],
+      "note": ""
+    },
+    {
+      "id": "c028",
+      "kind": "positive",
+      "query": "ontology-driven-dev 的演示系统默认账号密码是什么？",
+      "card_id": "gh-1351417776",
+      "repo": "sharptoolbox/ontology-driven-dev",
+      "lang_pair": "zh_query_zh_doc",
+      "difficulty": "detail",
+      "answer_span": [
+        4703,
+        4756
+      ],
+      "answer_excerpt": "**默认账号**：`admin / admin123`（详见 `techbase/README.md`）。",
+      "covering_chunk_ordinals": [
+        4,
+        5
+      ],
+      "note": ""
+    },
+    {
+      "id": "c029",
+      "kind": "positive",
+      "query": "这份 CSAPP 中文资料里的练习题答案是谁提供的？",
+      "card_id": "gh-1372455596",
+      "repo": "SunnyMaria/csapp-zh-markdown",
+      "lang_pair": "zh_query_zh_doc",
+      "difficulty": "detail",
+      "answer_span": [
+        2112,
+        2152
+      ],
+      "answer_excerpt": "答案部分是原书提供的**练习题答案**，不包含自行编写的家庭作业解答或实验解答。",
+      "covering_chunk_ordinals": [
+        4,
+        5
+      ],
+      "note": ""
+    },
+    {
+      "id": "c030",
+      "kind": "positive",
+      "query": "Meme雷达默认每轮最多深度审计几个代币？",
+      "card_id": "gh-1366032081",
+      "repo": "nhovongoc0-max/meme-radar",
+      "lang_pair": "zh_query_zh_doc",
+      "difficulty": "detail",
+      "answer_span": [
+        2684,
+        2707
+      ],
+      "answer_excerpt": "默认每轮最多深审 6 个币，并受时间预算限制。",
+      "covering_chunk_ordinals": [
+        5
+      ],
+      "note": ""
+    },
+    {
+      "id": "c031",
+      "kind": "positive",
+      "query": "EmbodiedJev 的「逐步 XYZ 规划」里，模型每轮从哪些动作中选择？",
+      "card_id": "gh-1377868587",
+      "repo": "FBddcz/embodied-jev",
+      "lang_pair": "zh_query_zh_doc",
+      "difficulty": "detail",
+      "answer_span": [
+        7433,
+        7476
+      ],
+      "answer_excerpt": "每轮由模型从 ±X/Y/Z 的 40、10、2 mm 短步，以及开爪、闭爪、保持中选择",
+      "covering_chunk_ordinals": [
+        11
+      ],
+      "note": ""
+    },
+    {
+      "id": "c032",
+      "kind": "positive",
+      "query": "VpsCT 里把服务器资源分享给别人时，对方需要拿到面板管理员账户吗？",
+      "card_id": "gh-1371300806",
+      "repo": "YongshengWin/VpsCT",
+      "lang_pair": "zh_query_zh_doc",
+      "difficulty": "detail",
+      "answer_span": [
+        2696,
+        2722
+      ],
+      "answer_excerpt": "使用者通过分享链接访问资源，无需获得面板管理员账户。",
+      "covering_chunk_ordinals": [
+        3,
+        4
+      ],
+      "note": ""
+    },
+    {
+      "id": "c033",
+      "kind": "positive",
+      "query": "gpt6-prompt-writer 里的「指令冲突」需要区分哪几类约束？",
+      "card_id": "gh-1360234174",
+      "repo": "gnipbao/gpt6-prompt-writer",
+      "lang_pair": "zh_query_zh_doc",
+      "difficulty": "detail",
+      "answer_span": [
+        1916,
+        1948
+      ],
+      "answer_excerpt": "**指令冲突**：区分用户目标、技能建议和平台系统/开发者约束。",
+      "covering_chunk_ordinals": [
+        4
+      ],
+      "note": ""
+    },
+    {
+      "id": "c034",
+      "kind": "positive",
+      "query": "OntiCards 兼容哪些大模型？",
+      "card_id": "gh-1353072228",
+      "repo": "stepll2026/OntiCards",
+      "lang_pair": "zh_query_zh_doc",
+      "difficulty": "detail",
+      "answer_span": [
+        3698,
+        3748
+      ],
+      "answer_excerpt": "配置LLM大模型（兼容GPT、Claude、通义千问、DeepSeek、智谱、本地Ollama模型）",
+      "covering_chunk_ordinals": [
+        6,
+        7
+      ],
+      "note": ""
+    },
+    {
+      "id": "c035",
+      "kind": "positive",
+      "query": "workbuddy2api-hub v1.5.4 为什么要把「消耗积分」的统计口径统一？",
+      "card_id": "gh-1367131646",
+      "repo": "ardeyouxipianyi/workbuddy2api-hub",
+      "lang_pair": "zh_query_zh_doc",
+      "difficulty": "detail",
+      "answer_span": [
+        8345,
+        8368
+      ],
+      "answer_excerpt": "同一页面上两个都叫「消耗积分」的数字永远对不上",
+      "covering_chunk_ordinals": [
+        10,
+        11
+      ],
+      "note": ""
+    },
+    {
+      "id": "c036",
+      "kind": "positive",
+      "query": "huashu-chrome 的驾驶舱会不会显示 agent 输入的内容？",
+      "card_id": "gh-1346858216",
+      "repo": "alchaincyf/huashu-chrome",
+      "lang_pair": "zh_query_zh_doc",
+      "difficulty": "detail",
+      "answer_span": [
+        10291,
+        10342
+      ],
+      "answer_excerpt": "驾驶舱上会打出 agent 刚做的动作（「点击 e12」）和最近的时间线，但**绝不显示输入的内容**",
+      "covering_chunk_ordinals": [
+        9,
+        10
+      ],
+      "note": ""
+    }
+  ],
+  "negatives": [
+    {
+      "id": "n001",
+      "kind": "negative",
+      "query": "今天北京的天气怎么样",
+      "why": "天气，语料里只有 GitHub README",
+      "answer_span": null
+    },
+    {
+      "id": "n002",
+      "kind": "negative",
+      "query": "红烧肉怎么做才好吃",
+      "why": "菜谱",
+      "answer_span": null
+    },
+    {
+      "id": "n003",
+      "kind": "negative",
+      "query": "感冒了应该吃什么药",
+      "why": "医疗",
+      "answer_span": null
+    },
+    {
+      "id": "n004",
+      "kind": "negative",
+      "query": "帮我写一首关于秋天的七言绝句",
+      "why": "创作，无检索需求",
+      "answer_span": null
+    },
+    {
+      "id": "n005",
+      "kind": "negative",
+      "query": "2026 年世界杯冠军是哪支球队",
+      "why": "时事体育",
+      "answer_span": null
+    },
+    {
+      "id": "n006",
+      "kind": "negative",
+      "query": "明天上海到杭州的高铁还有票吗",
+      "why": "出行购票",
+      "answer_span": null
+    },
+    {
+      "id": "n007",
+      "kind": "negative",
+      "query": "推荐几部好看的科幻电影",
+      "why": "影视推荐",
+      "answer_span": null
+    },
+    {
+      "id": "n008",
+      "kind": "negative",
+      "query": "我的猫最近不吃东西怎么办",
+      "why": "宠物",
+      "answer_span": null
+    },
+    {
+      "id": "n009",
+      "kind": "negative",
+      "query": "个人所得税年度汇算怎么申报",
+      "why": "税务",
+      "answer_span": null
+    },
+    {
+      "id": "n010",
+      "kind": "negative",
+      "query": "附近有哪些评价好的川菜馆",
+      "why": "本地生活",
+      "answer_span": null
+    }
+  ]
+}
