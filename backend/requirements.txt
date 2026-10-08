@@ -7,13 +7,20 @@ python-multipart==0.0.7
 pydantic>=2.5.3,<3.0.0
 pydantic-settings>=2.1.0,<3.0.0
 
-## AI/LLM Integration (精简版)
+## AI/LLM Integration（精简版）
+# 只保留真正被 import 的包：
+#   langchain-openai  ← create_llm() 里的 ChatOpenAI，多 Provider 接入的唯一入口
+#   langchain / langchain-community / numpy ← LangChain 自身的依赖栈，随它传递引入
+#
+# 已移除的零引用依赖（全仓库 grep 确认无 import，含顶层脚本与 alembic 目录）：
+#   langgraph              —— 状态机是手写的，未引入图编排
+#   mem0ai                 —— 记忆是自建的（Redis + Qdrant），只在 config 留了 mem0_api_key 字段
+#   sentence-transformers  —— 会连带装 torch + transformers（约 2GB），而向量化实际是
+#                             httpx 调远程 API（Aliyun/Voyage/OpenAI/Zhipu/Baidu），
+#                             本地模型从未被加载
 langchain>=0.3.0,<0.4.0
 langchain-community>=0.3.0,<0.4.0
 langchain-openai>=0.3.0,<0.4.0
-langgraph>=0.2.0,<0.3.0
-mem0ai==0.1.0
-sentence-transformers==2.2.2
 numpy>=2.0
 
 ## Vector Database
