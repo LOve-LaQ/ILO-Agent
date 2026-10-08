@@ -78,6 +78,7 @@ _local_backup/
 /docs/简历改写-*.md
 /docs/技术选型与困难故事.md
 /COMMIT_PLAN.md
+/docs/小程序-agent-开发计划.md
 
 # 评测过程产物（可由 build_retrieval_cases.py --dump 重新生成）
 /backend/retrieval_worksheet.md
