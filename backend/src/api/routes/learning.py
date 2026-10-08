@@ -13,6 +13,8 @@
 - 会话上下文按「内存 → Redis → PostgreSQL」三级读取，读不到返回 SESSION_NOT_FOUND，
   不再硬编码占位上下文
 - 会话/对话/测验/完成统一落 PostgreSQL（真相源），Redis 仅作 TTL 1h 的热缓存
+- `/chat` 会做一次块级检索并注入【参考资料】，检索失败只降级为「不注入」，
+  不影响接口可用性
 """
 
 from datetime import datetime, timedelta, timezone
@@ -321,6 +323,93 @@ def _generate_fallback_response(question: str, context: dict) -> str:
     )
 
 
+# 拼进提示词的对话历史轮数上限。与 `ChatRequest.conversation_history` 的
+# `MAX_CHAT_HISTORY_TURNS` 是两个不同的约束：那个管**请求体大小**（防注入超长文本），
+# 这个管**提示词长度**（防历史挤掉回答空间）。两者都不设，一次超长历史就能
+# 把参考资料和回答一起挤出上下文窗口。
+_CHAT_HISTORY_TURNS = 10
+
+
+def _build_chat_system_prompt(news_context: dict, reference_block: str = "") -> str:
+    """拼 `/chat` 的系统提示词。
+
+    **不含对话历史** —— 历史按真实的消息角色发送（见 `_build_chat_messages`）。
+    把历史压成一段文本塞进系统提示词，等于让模型分不清「系统约束」和
+    「用户说过的话」，而多轮对话本来就该用多轮消息表达。
+
+    【为什么要抽成纯函数】LLM 在测试里是被强制降级的（conftest 的
+    `_force_llm_fallback` 把 `llm` 置 None），所以「提示词到底长什么样」
+    在接口层永远断言不到。而提示词正是 **RAG 注入的唯一生效点** ——
+    它错了不会有任何报错，只会让回答变差。抽出来才能单测。
+    """
+    parts = [
+        "你是一位耐心友好的技术导师，正在帮助用户理解一个技术概念。",
+        "",
+        "【学习内容】",
+        f"主题：{news_context.get('topic', '')}",
+        f"简介：{news_context.get('summary', '')}",
+        f"核心概念：{', '.join(news_context.get('core_concepts') or [])}",
+    ]
+
+    if reference_block:
+        parts += ["", reference_block]
+
+    parts += [
+        "",
+        "【回答要求】",
+        "1. 用简洁易懂的语言回答，避免过于学术化",
+        "2. 结合用户的背景知识，循序渐进",
+        "3. 适当举例子，帮助理解抽象概念",
+        "4. 如果用户问到代码实现，给出具体示例",
+        "5. 每次回答控制在 200-300 字以内",
+        "6. 使用 Markdown 格式，支持 **粗体**、`代码块`",
+    ]
+
+    if reference_block:
+        # 这条只在**真的注入了资料**时才加。没有资料却要求「资料里没有就直说」，
+        # 会逼模型对着一份不存在的资料表态，比不加更糟。
+        parts.append(
+            "7. **优先依据【参考资料】回答**，并在句末标出来源编号（如 `[1]`）；"
+            "资料里没提到的内容直接说「资料里没有」，不要凭印象补充"
+        )
+
+    return "\n".join(parts)
+
+
+def _build_chat_messages(system_prompt: str, history: list, user_message: str) -> list:
+    """组装成 LangChain 的消息列表。
+
+    【为什么不再传单个字符串】此前调用是 `llm.invoke(system_prompt)`，传字符串时
+    LangChain 会把它包成 **`HumanMessage`** —— 变量名叫 `system_prompt`，实际发出去
+    却是用户消息。角色错了不报错，只是让系统约束和用户输入在模型眼里同级。
+
+    【为什么要去掉历史尾部那条重复提问】前端在发起请求前会先把用户气泡 append
+    进本地消息列表（`useLearningSession.ts`），所以 `conversation_history` 的最后
+    一条通常**就是本轮提问**。不去重的话，模型会连着看到两遍同一个问题。
+    接口对外的契约是「`message` 是本轮提问」，所以这里以 `message` 为准。
+    """
+    from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+
+    trimmed = list(history or [])
+    if (
+        trimmed
+        and trimmed[-1].get("role") == "user"
+        and (trimmed[-1].get("content") or "").strip() == user_message
+    ):
+        trimmed.pop()
+
+    messages: list = [SystemMessage(content=system_prompt)]
+    for msg in trimmed[-_CHAT_HISTORY_TURNS:]:
+        content = msg.get("content") or ""
+        if msg.get("role") == "assistant":
+            messages.append(AIMessage(content=content))
+        else:
+            messages.append(HumanMessage(content=content))
+    messages.append(HumanMessage(content=user_message))
+    return messages
+
+
+
 @router.post("/session", response_model=SessionCreateResponse)
 async def create_learning_session(
     request: Request, data: SessionCreateRequest, user: CurrentUser
@@ -448,6 +537,15 @@ async def chat_with_ai(request: Request, data: ChatRequest, user: CurrentUser) -
 
     匿名不可用（`CurrentUser` 依赖）+ IP 限流：每次调用都会真实触发一次 LLM 推理，
     是明确的外部成本放大面。
+
+    ## 检索增强（RAG）
+    在拼提示词之前会先做一次块级检索（`modules/rag/chat_context.py`），命中的块
+    以【参考资料】的形式注入，并在响应 `sources.references` 里给出**块级**引用。
+    三道闸门保证它「只会加分、不会减分」：请求预算 → `QDRANT_READ` 熔断 → 相似度阈值。
+    **任何一环失败都只是不注入**，问答照常返回，接口不会因为向量库挂掉而 5xx。
+
+    引用只到**块**、不到**句子**：句子级溯源要模型逐句输出编号再回校验，代价是
+    多一轮解析且不可靠（模型会编编号）。给块级引用是诚实的。
     """
     from src.modules.agent.state_machine import llm, LLM_AVAILABLE
 
@@ -496,26 +594,39 @@ async def chat_with_ai(request: Request, data: ChatRequest, user: CurrentUser) -
         "core_concepts": session_ctx.get("core_concepts", []),
     }
 
-    # 构建系统提示词
-    system_prompt = f"""
-你是一位耐心友好的技术导师，正在帮助用户理解一个技术概念。
+    # ---- 检索增强：从语料库里找出与本轮提问相关的块，拼进提示词 ----
+    #
+    # 三道闸门都在 `build_chat_context` / `retriever` 内部（预算 → 熔断 → 阈值），
+    # 这里只负责「拿不到就什么都不注入」：检索是锦上添花的一环，它挂掉
+    # （Qdrant 连不上、预算耗尽、没有块过阈值）都不该让问答 500，更不该让用户
+    # 看到报错。失败原因留在 `chat_ctx.reason` 里，通过日志与响应体的
+    # `sources.references` 体现。
+    #
+    # 【为什么惰性 import】`chat_context` → `retriever` → `chunk_store` 会把
+    # `qdrant_client` 一起拉起来。放在模块顶层，等于让 `/session`、`/quiz` 这些
+    # 完全不碰向量的接口也付这份导入成本（与 `state_machine` 惰性导入同理）。
+    from src.modules.rag.chat_context import ChatContext, build_chat_context
 
-【学习内容】
-主题：{news_context['topic']}
-简介：{news_context['summary']}
-核心概念：{', '.join(news_context['core_concepts'])}
+    chat_ctx = ChatContext()
+    if settings.rag_chat_enabled:
+        chat_ctx = await build_chat_context(
+            user_message,
+            deadline=getattr(request.state, "deadline", None),
+            max_tokens=settings.rag_chat_context_tokens,
+        )
+        if chat_ctx.injected:
+            logger.info(
+                "event=rag_chat_injected refs={} query_chars={} reason={}",
+                len(chat_ctx.references),
+                len(chat_ctx.query),
+                chat_ctx.reason,
+            )
+        elif chat_ctx.degraded:
+            # 只有「系统原因没拿到」才告警；「确实没有相关资料」是正常业务，
+            # 走「我没有相关资料」的话术即可（见 retriever 的原因码分类）。
+            logger.warning("event=rag_chat_degraded reason={}", chat_ctx.reason)
 
-【回答要求】
-1. 用简洁易懂的语言回答，避免过于学术化
-2. 结合用户的背景知识，循序渐进
-3. 适当举例子，帮助理解抽象概念
-4. 如果用户问到代码实现，给出具体示例
-5. 每次回答控制在 200-300 字以内
-6. 使用 Markdown 格式，支持 **粗体**、`代码块`
-
-【当前对话历史】
-{chr(10).join([f"{msg['role']}: {msg['content']}" for msg in history[-10:]]) if history else "暂无历史"}
-"""
+    system_prompt = _build_chat_system_prompt(news_context, chat_ctx.block)
 
     # 请求级预算：把「这次请求还剩多少时间」夹到本次 LLM 调用上。
     # 剩余不足就直接降级 —— 让网关先超时、用户拿到 502，比拿到一段降级文案更糟。
@@ -544,8 +655,13 @@ async def chat_with_ai(request: Request, data: ChatRequest, user: CurrentUser) -
             # 同步 invoke 在 async 路由里会独占事件循环：一次几十秒的 LLM 调用期间，
             # 同 worker 上所有请求（含 /health）全部排队。卸载到线程池后立即归还。
             # timeout 按次传入：客户端默认值只作兜底，本次真正可用的时间由预算决定。
+            #
+            # 【为什么传 messages 而不是一个字符串】见 `_build_chat_messages`：
+            # 传字符串时 LangChain 会包成 HumanMessage，系统提示词其实没走 system 角色；
+            # 而且历史里通常已经含本轮提问，不组装消息列表就会重复发一遍。
+            messages = _build_chat_messages(system_prompt, history, user_message)
             response = await asyncio.to_thread(
-                llm.invoke, system_prompt, timeout=llm_timeout
+                llm.invoke, messages, timeout=llm_timeout
             )
             ai_response = (response.content or "").strip()
             if not ai_response:
@@ -603,7 +719,22 @@ async def chat_with_ai(request: Request, data: ChatRequest, user: CurrentUser) -
         "session_id": session_id,
         "response": ai_response,
         "conversation_history": updated_history,
-        "sources": news_context,
+        # `references` 为空表示本轮没有注入资料（总开关关闭 / 没有块过阈值 / 降级）。
+        # 给前端一个可判定的信号，而不是让它猜「这次答案是不是有依据」。
+        "sources": {
+            **news_context,
+            "references": [
+                {
+                    "ordinal": ref.ordinal,
+                    "card_id": ref.card_id,
+                    "title": ref.title,
+                    "source_url": ref.source_url,
+                    "score": ref.score,
+                    "heading_path": list(ref.heading_path),
+                }
+                for ref in chat_ctx.references
+            ],
+        },
     }
 
 

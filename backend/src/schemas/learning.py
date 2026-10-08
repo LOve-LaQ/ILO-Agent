@@ -119,12 +119,36 @@ class ChatRequest(BaseModel):
     )
 
 
+class ChatSourceReference(BaseModel):
+    """回答依据的**一块**语料（块级引用，不是句子级）
+
+    只给到块级是刻意的：句子级溯源需要模型逐句输出引用编号、再由后端回校验，
+    代价是额外一轮解析且**不可靠**（模型会编出并不存在的编号）。块级引用是
+    诚实的 —— 用户能看到依据来自哪张卡哪一节，我们也不假装做了做不到的事。
+    """
+
+    ordinal: int = Field(..., description="提示词里的编号，从 1 开始")
+    card_id: str = Field(..., description="来源卡片 ID")
+    title: str = ""
+    source_url: str = ""
+    score: float = Field(0.0, description="向量相似度（仅排序参考，不是可信度）")
+    heading_path: List[str] = Field(
+        default_factory=list, description="块在原文中的小节路径"
+    )
+
+
 class ChatSources(BaseModel):
-    """回答所依据的会话上下文"""
+    """回答所依据的材料：会话上下文 +（有检索时）块级引用
+
+    `references` 为空表示**本轮没有注入任何资料** —— 可能因为检索总开关关闭、
+    没有块过阈值、或检索链路降级。前端据此可以区分「基于卡片作答」和
+    「基于知识库作答」。
+    """
 
     topic: str = ""
     summary: str = ""
     core_concepts: List[str] = Field(default_factory=list)
+    references: List[ChatSourceReference] = Field(default_factory=list)
 
 
 class ChatResponse(BaseModel):

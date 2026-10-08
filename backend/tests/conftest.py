@@ -147,6 +147,23 @@ def _relax_security_guards(monkeypatch):
     yield
 
 
+@pytest.fixture(autouse=True)
+def _disable_rag_in_chat(monkeypatch):
+    """逐个用例关闭 `/chat` 的检索增强。
+
+    【为什么必须关】`backend/.env` 里有真实的 `ALIYUN_API_KEY`，而 `learning.py`
+    在模块顶层调了 `load_dotenv()` —— 也就是说测试进程里**拿得到真 key**。
+    检索开着的话，每个 `/chat` 契约测试都会真的去调一次 embedding API，
+    再连一次本机 Qdrant：用例变成「联网 + 依赖本机服务」，既慢又不确定，
+    直接违背「单测离线可复现」这条纪律。
+
+    需要覆盖「检索真的注入」这条路径的用例，自行 monkeypatch 打开，并把
+    `chat_context.build_chat_context` 换成假件（见 `test_api_contract.py`）。
+    """
+    monkeypatch.setattr(settings, "rag_chat_enabled", False)
+    yield
+
+
 @pytest.fixture
 def fake_redis():
     """注入 fakeredis：限流 / 登录失败计数 / sid 黑名单全部走内存，用例间互不干扰。

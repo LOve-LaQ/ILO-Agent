@@ -1,6 +1,6 @@
 # RAG Module - __init__.py
 """检索增强生成：切分（`chunker`）、块规格（`chunk_spec`）、块向量库（`chunk_store`）、
-检索（`retriever`）。
+检索（`retriever`）、问答注入（`chat_context`）。
 
 【为什么这里只导出 `chunk_markdown`，其余子模块要显式 import 全路径】
 本包内部互相引用（`retriever` → `chunk_store` → `chunk_spec`）。如果在 `__init__`

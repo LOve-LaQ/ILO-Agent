@@ -151,6 +151,16 @@ class Settings(BaseSettings):
     # 既是成本闸门（每张要取向量），也避免「早期一次性浏览」长期主导画像
     interest_profile_max_candidates: int = 200
 
+    # 检索增强生成（RAG）接进问答
+    # 【为什么必须留一个总开关】实测命中率 hit@5 是 77.8%，且**是乐观上界**
+    # （评测集是自己读原文出的题）—— 意味着大约每 4~5 个问题就有 1 个正确块
+    # 不在候选里。**注入错误的上下文比不注入更糟**：模型会照着错块一本正经地编。
+    # 有开关才能做「注入 vs 不注入」的对照，也才能在发现质量下降时一键回退。
+    rag_chat_enabled: bool = True
+    # 注入提示词的参考资料 token 预算。推导见 rag/chat_context.MAX_CONTEXT_TOKENS：
+    # 5 条块约 4,000 字符 ≈ 2,000 token，取 1800 给对话历史和回答留余量。
+    rag_chat_context_tokens: int = 1800
+
     # Agent Configuration
     max_tokens: int = 4096
     num_questions: int = 3

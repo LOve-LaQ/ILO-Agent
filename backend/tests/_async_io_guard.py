@@ -100,6 +100,10 @@ KNOWN_IO_NAMES = frozenset(
         # ---- modules/rag/chunk_store.py（Qdrant）----
         # 构造期发一次 get_collections() 往返；检索路径的调用点必须整体丢线程池。
         "get_chunk_store",
+        # ---- modules/rag/retriever.py（PostgreSQL）----
+        # 按 card_id + 字符区间回取块正文。同步 DB 查询，调用方必须丢线程池
+        # （见 `chat_context.build_chat_context` 的 `asyncio.to_thread`）。
+        "hydrate_texts",
         # ---- core/db.py ----
         "get_session_factory",
         # ---- 通用 ----

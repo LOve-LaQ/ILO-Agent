@@ -216,6 +216,9 @@ def test_session_chat_complete_lifecycle(client):
     assert chat_body["response"]
     # sources 必须回填真实会话上下文，而非硬编码占位
     assert chat_body["sources"]["topic"] == "pytest 契约测试主题"
+    # 检索默认关闭（见 conftest 的 `_disable_rag_in_chat`），但字段必须在 ——
+    # 前端的类型是从 OpenAPI 派生的，字段缺席会让生成出来的类型与运行时不一致。
+    assert chat_body["sources"]["references"] == []
     assert len(chat_body["conversation_history"]) == 3
 
     done = client.post("/api/v1/learning/complete", json={"session_id": session_id})
@@ -229,6 +232,55 @@ def test_session_chat_complete_lifecycle(client):
     again = client.post("/api/v1/learning/complete", json={"session_id": session_id})
     assert again.status_code == 404
     assert again.json()["code"] == "SESSION_NOT_FOUND"
+
+
+def test_chat_surfaces_block_level_references_when_retrieval_injects(client, monkeypatch):
+    """检索真的注入时，响应要带**块级**引用（可溯源到卡 + 小节 + 链接）。
+
+    这里把 `build_chat_context` 换成假件：真检索会调 embedding API 再连本机
+    Qdrant，违背「单测离线可复现」。本用例要验的是**接线** ——
+    注入的东西有没有走到提示词和响应字段里；检索本身的行为由
+    `test_chat_context.py` 覆盖。
+    """
+    from src.core.config import settings
+    from src.modules.rag import chat_context as cc
+
+    session_id = _create_session(client, item_id="rag-chat-item")
+
+    async def _fake_build(message, **kwargs):
+        # 顺带断言路由把**本轮提问原话**传下去了（查询不做改写、不拼主题锚点）
+        assert message == "它怎么安装？"
+        return cc.ChatContext(
+            query=message,
+            block="【参考资料】（来自项目知识库，按相关度从高到低）\n[1] 某仓库\n正文内容",
+            references=(
+                cc.ChatReference(
+                    ordinal=1,
+                    card_id="card-1",
+                    title="某仓库",
+                    source_url="https://example.com/repo",
+                    score=0.66,
+                    heading_path=("Usage", "Install"),
+                    excerpt="正文内容",
+                ),
+            ),
+            reason="ok",
+        )
+
+    monkeypatch.setattr(settings, "rag_chat_enabled", True)
+    monkeypatch.setattr(cc, "build_chat_context", _fake_build)
+
+    resp = client.post(
+        "/api/v1/learning/chat",
+        json={"session_id": session_id, "message": "它怎么安装？"},
+    )
+    assert resp.status_code == 200, resp.text
+    refs = resp.json()["sources"]["references"]
+    assert len(refs) == 1
+    assert refs[0]["ordinal"] == 1
+    assert refs[0]["card_id"] == "card-1"
+    assert refs[0]["heading_path"] == ["Usage", "Install"]
+    assert refs[0]["source_url"] == "https://example.com/repo"
 
 
 def test_push_and_response_use_real_session_context(client):
