@@ -97,6 +97,9 @@ KNOWN_IO_NAMES = frozenset(
         # ---- 惰性单例工厂：首次构造会连下游，甚至是 8s 级的惰性 import ----
         "get_memory_manager",
         "get_state_machine",
+        # ---- modules/rag/chunk_store.py（Qdrant）----
+        # 构造期发一次 get_collections() 往返；检索路径的调用点必须整体丢线程池。
+        "get_chunk_store",
         # ---- core/db.py ----
         "get_session_factory",
         # ---- 通用 ----
@@ -133,6 +136,7 @@ IO_FACTORY_NAMES = frozenset(
         "get_redis_client",
         "get_memory_manager",
         "get_state_machine",
+        "get_chunk_store",
     }
 )
 
