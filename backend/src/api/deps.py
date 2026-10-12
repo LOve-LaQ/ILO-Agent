@@ -12,13 +12,26 @@ import uuid
 from typing import Annotated, Optional
 
 import jwt
-from fastapi import Depends, Request
+from fastapi import Depends, Request, Security
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.orm import Session
 
 from src.core.db import get_db, get_optional_db
 from src.core.errors import ILOException
 from src.core.security import decode_token
 from src.models.user import User
+
+
+# Bearer 认证方案（纯 OpenAPI 元数据）。
+#
+# 实际的凭证解析在 `_extract_bearer_token` 里手工完成，因此 OpenAPI 文档此前
+# 看不到任何 securityScheme —— Swagger UI 的 Authorize 按钮不出现，需要登录的
+# 接口在文档里点 Execute 必然 401，无法自测。
+#
+# `auto_error=False` 确保这里**只贡献元数据**：缺少/格式错误的 Authorization
+# 头不会在此抛错，仍交由 `get_current_user` 统一归一为 401 业务错误（前端依赖
+# 这些业务 code 决定是静默 refresh 还是跳登录），错误语义与响应体保持不变。
+_bearer_scheme = HTTPBearer(auto_error=False, description="登录后获得的 access token")
 
 
 def _extract_bearer_token(request: Request) -> Optional[str]:
@@ -29,7 +42,13 @@ def _extract_bearer_token(request: Request) -> Optional[str]:
     return token or None
 
 
-def get_current_user(request: Request, db: Session = Depends(get_db)) -> User:
+def get_current_user(
+    request: Request,
+    db: Session = Depends(get_db),
+    # 用 Security()（而非 Depends()）声明，FastAPI 才会把它写进 OpenAPI 的
+    # `security` 段，Swagger 的 Authorize 按钮才会出现。鉴权逻辑不读这个参数。
+    _credentials: Optional[HTTPAuthorizationCredentials] = Security(_bearer_scheme),
+) -> User:
     """解析当前登录用户；任何凭证问题都归一为 401 业务错误"""
     token = _extract_bearer_token(request)
     if token is None:
