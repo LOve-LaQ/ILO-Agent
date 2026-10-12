@@ -58,8 +58,15 @@ python backend/start_dev.py
 
 ### **步骤 3: 访问应用**
 
+```bash
+# 前端（React + Vite，开发服务器 5173，已配同源代理到后端 8000）
+cd frontend
+npm install
+npm run dev
+```
+
 - **API Docs**: http://localhost:8000/docs
-- **前端界面**: 会自动在浏览器中打开 `frontend/index.html`
+- **前端界面**: http://localhost:5173
 
 ---
 
@@ -96,7 +103,7 @@ RSS/API  定时触发   LLM 生成   互动测试   FSRS 算法计算
 
 ```mermaid
 flowchart TB
-    UI["前端 · Alpine.js SPA"] -->|"REST /api/v1"| API["FastAPI 应用层"]
+    UI["前端 · React 19 + Vite SPA"] -->|"REST /api/v1"| API["FastAPI 应用层"]
     API --> DISC["资讯发现路由"]
     API --> LEARN["学习会话路由"]
     SCH["定时调度 · APScheduler"] --> ENGINE["发现引擎 · 多源抓取 + 去重"]
@@ -161,7 +168,7 @@ ilo-agent-demo/
 │   └── requirements.txt             # Python 依赖
 │
 ├── frontend/                        # Web 前端
-│   └── index.html                   # Alpine.js 单页面应用
+│   └── index.html                   # Vite 入口（React 19 SPA）
 │
 ├── docker-compose.yml               # Docker 编排
 └── README.md                        # 本文件
@@ -281,15 +288,18 @@ cd backend
 pip install -r requirements.txt
 python src/api/main.py            # 监听 0.0.0.0:8000
 
-# 3) 打开前端
-#    直接打开 frontend/index.html；或一键启动：python backend/start_dev.py
+# 3) 启动前端（另开一个终端）
+cd frontend && npm install && npm run dev     # http://127.0.0.1:5173
 ```
 
 **自检**
-- `GET http://127.0.0.1:8000/health` → `{"status":"healthy","service":"ILO-Agent Demo"}`
-- 打开 `http://127.0.0.1:8000/docs`，可见 `Discovery` 与 `Learning` 两组接口
+- `GET http://127.0.0.1:8000/health` → `{"status":"healthy","service":"ILO-Agent Demo","checks":{"redis":"ok","postgres":"ok","qdrant":"ok"}}`
+- 打开 `http://127.0.0.1:8000/docs`，可见 `Discovery` / `Auth` / `Learning` / `我的` 四组接口
+- 打开 `http://127.0.0.1:5173`，首页应出现资讯卡片流
 
-> 📸 截图位：`docs/images/00-swagger.png` — Swagger 接口总览
+> 📸 Swagger 接口总览 —— `Discovery` / `Auth` / `Learning` / `我的` 四组，右上角 `Authorize` 可用 access token 直接调试
+>
+> <img src="docs/images/00-swagger.png" alt="Swagger 接口总览" width="880">
 
 ---
 
@@ -315,8 +325,13 @@ curl -X POST "http://127.0.0.1:8000/api/v1/discover/refresh?limit=50"
 
 **对照代码**：`api/routes/discover.py`（`get_recommended_news` / `refresh_news`）· `modules/discovery/github_fetcher.py` · `modules/discovery/tech_knowledge.py`
 
-> 📸 截图位：`docs/images/01-feed.png` — 资讯卡片流
-> 📸 截图位：`docs/images/02-refresh.png` — 刷新进度（"通义千问提炼中文摘要…"）
+> 📸 资讯卡片流 —— 标题、中文摘要、标签、星数均由抓取链路真实产出（右上角 `仓库 1007` 为知识库当前条数）
+>
+> <img src="docs/images/01-feed.png" alt="资讯卡片流" width="880">
+
+> 📸 刷新进度 —— 点「抓取最新」后进入阶段提示，此刻正在用通义千问批量提炼中文摘要
+>
+> <img src="docs/images/02-refresh.png" alt="刷新进度" width="880">
 
 ---
 
@@ -324,14 +339,24 @@ curl -X POST "http://127.0.0.1:8000/api/v1/discover/refresh?limit=50"
 
 **操作**：点卡片「开始讲解」创建会话，随后在对话面板追问。
 
-```bash
-# 1) 创建学习会话
-curl -X POST "http://127.0.0.1:8000/api/v1/learning/session" -H "Content-Type: application/json" \
-  -d '{"user_id":"demo-user","news_item_id":"news-001","time_budget":15,"preferred_depth":"medium"}'
+> 以下命令需登录态（`/learning/*` 全部要求 access token）；前端会自动携带，
+> curl 演示时先取 token：`TOKEN=$(curl -s -X POST http://127.0.0.1:8000/api/v1/auth/login -H "Content-Type: application/json" -d '{"identifier":"demoshot","password":"<你的密码>"}' | python -c "import sys,json;print(json.load(sys.stdin)['access_token'])")`
 
-# 2) 围绕该主题提问
+```bash
+# 1) 创建学习会话（news_item_id 取自上一步返回的卡片 id）
+curl -X POST "http://127.0.0.1:8000/api/v1/learning/session" -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $TOKEN" \
+  -d '{"user_id":"demoshot","news_item_id":"gh-1353225810","time_budget":15,"preferred_depth":"medium"}'
+
+# 2) 用户响应「展开讲讲」→ 生成讲解并出题（状态转 quiz）
+curl -X POST "http://127.0.0.1:8000/api/v1/learning/response" -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $TOKEN" \
+  -d '{"session_id":"sess_xxxxxxxx","user_input":"展开讲讲"}'
+
+# 3) 围绕该主题提问
 curl -X POST "http://127.0.0.1:8000/api/v1/learning/chat" -H "Content-Type: application/json" \
-  -d '{"session_id":"sess_xxxxxxxx","message":"什么是 Pydantic？"}'
+  -H "Authorization: Bearer $TOKEN" \
+  -d '{"session_id":"sess_xxxxxxxx","message":"它的核心设计思路是什么？"}'
 ```
 
 **预期表现**
@@ -346,18 +371,25 @@ curl -X POST "http://127.0.0.1:8000/api/v1/learning/chat" -H "Content-Type: appl
 
 **对照代码**：`api/routes/learning.py`（`create_learning_session` / `chat_with_ai`）· `modules/agent/state_machine.py`（`create_llm` / `ExplanationEngine`）
 
-> 📸 截图位：`docs/images/03-session.png` — 会话创建与上下文
-> 📸 截图位：`docs/images/04-chat.png` — AI 讲解对话
+> 📸 会话创建与上下文 —— 右侧学习抽屉，抬头是会话号与驱动模型（刷新页面后由服务端恢复）
+>
+> <img src="docs/images/03-session.png" alt="学习会话与上下文" width="880">
+
+> 📸 AI 讲解对话 —— 多轮追问的真实回答；文末「资料里没有」是检索边界下的诚实说明，引用标记指向原文块
+>
+> <img src="docs/images/04-chat.png" alt="AI 讲解对话" width="520">
 
 ---
 
 ### **步骤 3 · 测验评分**
 
-> 资讯流与讲解对话可在前端界面直接操作；测验与复习环节通过 `/docs`（Swagger）或 curl 演示，重点展示后端状态机逻辑。
+> 资讯流与讲解对话在前端界面直接操作；测验与复习环节用 `/docs`（Swagger）演示 ——
+> 接口已声明 `HTTPBearer`，点右上角 `Authorize` 填入 access token 后可直接 Execute，重点展示后端状态机逻辑。
 
 **操作**
 ```bash
 curl -X POST "http://127.0.0.1:8000/api/v1/learning/quiz" -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $TOKEN" \
   -d '{"session_id":"sess_xxxxxxxx","user_answers":[3,0]}'
 ```
 
@@ -366,7 +398,9 @@ curl -X POST "http://127.0.0.1:8000/api/v1/learning/quiz" -H "Content-Type: appl
 
 **对照代码**：`modules/agent/state_machine.py`（`QuizFactory.evaluate` / `submit_quiz`）
 
-> 📸 截图位：`docs/images/05-quiz.png` — 测验与评分结果
+> 📸 测验与评分 —— Swagger 内真实调用 `/learning/quiz`，200 响应含逐题判定与 FSRS 复习间隔
+>
+> <img src="docs/images/05-quiz.png" alt="测验与评分" width="880">
 
 ---
 
@@ -375,6 +409,7 @@ curl -X POST "http://127.0.0.1:8000/api/v1/learning/quiz" -H "Content-Type: appl
 **操作**
 ```bash
 curl -X POST "http://127.0.0.1:8000/api/v1/learning/complete" -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $TOKEN" \
   -d '{"session_id":"sess_xxxxxxxx"}'
 ```
 
@@ -383,7 +418,9 @@ curl -X POST "http://127.0.0.1:8000/api/v1/learning/complete" -H "Content-Type: 
 
 **对照代码**：`modules/agent/state_machine.py`（`FSRSCalculator` / `complete_session`）
 
-> 📸 截图位：`docs/images/06-fsrs.png` — 复习计划与评级
+> 📸 复习计划与评级 —— `/learning/complete` 返回最终得分、评级与下次复习日期
+>
+> <img src="docs/images/06-fsrs.png" alt="FSRS 复习计划" width="880">
 
 ---
 
@@ -399,7 +436,10 @@ complete_session → COMPLETED   （归档会话，更新记忆）
 
 **一句话串讲**：定时任务把 GitHub Trending 的仓库抓下来，去重、摘要、向量入库；用户打开卡片点「开始讲解」，状态机从 `IDLE` 走到 `LEARNING` 调用 DeepSeek 生成讲解；答完测验把得分映射成 FSRS 评级，算出下次复习间隔写回记忆——整条链路是一条可观测的状态机流程，而非一堆相互独立的接口。
 
-> 📸 截图位：`docs/images/07-flow.png` — 完整链路（终端日志或页面组合图）
+> 📸 完整链路（后端日志）—— 同一次运行里，LLM 初始化 → 建会话 → 讲解 → 评分 → 归档，
+> 其中 `rag_chat_injected refs=3` 是检索资料真实注入对话的证据
+>
+> <img src="docs/images/07-flow.png" alt="完整链路终端日志" width="880">
 
 ---
 
