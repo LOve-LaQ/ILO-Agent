@@ -1,0 +1,33 @@
+{
+  "generatedAt": "2026-11-17T10:03:30.958Z",
+  "total": {
+    "raw": 856177,
+    "gzip": 248514
+  },
+  "byKind": {
+    "entry": {
+      "raw": 793269,
+      "gzip": 236448,
+      "files": 1
+    },
+    "css": {
+      "raw": 62908,
+      "gzip": 12066,
+      "files": 1
+    }
+  },
+  "files": [
+    {
+      "name": "index-CwktrMxA.js",
+      "kind": "entry",
+      "raw": 793269,
+      "gzip": 236448
+    },
+    {
+      "name": "index-RGEr4gqq.css",
+      "kind": "css",
+      "raw": 62908,
+      "gzip": 12066
+    }
+  ]
+}
