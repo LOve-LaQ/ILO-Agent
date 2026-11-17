@@ -15,7 +15,7 @@ import remarkRehype from 'remark-rehype';
 import rehypeRaw from 'rehype-raw';
 import rehypeSanitize from 'rehype-sanitize';
 
-import { markdownHtmlSchema } from '../src/components/ui/markdownHtmlSchema.ts';
+import { looksLikeHtmlBlock, markdownHtmlSchema } from '../src/components/ui/markdownHtmlSchema.ts';
 
 const sample = `# 标题
 
@@ -67,6 +67,31 @@ const mustStay = [
   ['徽章图片本身', tags.has('img')],
 ];
 
+// 不开 rehype-raw 的那条路径（普通对话正文）：尖括号必须原样保留，
+// 否则 AI 讲 C++ 泛型 / TS 泛型 / JSX 时正文会被吃掉一截。
+// 注意两点：带上 allowDangerousHtml（react-markdown 内部就这么配的），且**不挂 sanitize**
+// —— sanitize 会把未解析的 raw 节点整块删掉，正是这条断言要防的回归。
+const plain = unified()
+  .use(remarkParse)
+  .use(remarkGfm)
+  .use(remarkRehype, { allowDangerousHtml: true });
+const plainTree = plain.runSync(plain.parse('C++ 里用 vector<int> 存整型'));
+const plainText = [];
+(function walk(node) {
+  if (node.type === 'text' || node.type === 'raw') plainText.push(node.value);
+  for (const child of node.children ?? []) walk(child);
+})(plainTree);
+const plainDump = plainText.join('');
+
+const guards = [
+  ['README 块级标签 -> 启用 HTML 解析', looksLikeHtmlBlock('<p align="center">x</p>')],
+  ['<img> 徽章 -> 启用 HTML 解析', looksLikeHtmlBlock('<img src="a.svg" width="80">')],
+  ['C++ 泛型不误判', !looksLikeHtmlBlock('C++ 里用 vector<int> 存整型')],
+  ['TS 泛型不误判', !looksLikeHtmlBlock('泛型 List<T> 与 Map<K,V>')],
+  ['JSX 不误判', !looksLikeHtmlBlock('JSX: <Component prop={x} />')],
+  ['普通正文保留 <int>', plainDump.includes('vector<int>')],
+];
+
 let failed = 0;
 console.log('渲染结果标签:', [...tags].join(' '));
 console.log('\n必须被清除：');
@@ -77,6 +102,11 @@ for (const [name, hit] of mustBeGone) {
 console.log('\n必须保留：');
 for (const [name, ok] of mustStay) {
   console.log(ok ? `  ok   保留   -> ${name}` : `  FAIL 丢失   -> ${name}`);
+  if (!ok) failed += 1;
+}
+console.log('\n开关与不误伤：');
+for (const [name, ok] of guards) {
+  console.log(ok ? `  ok   ${name}` : `  FAIL ${name}`);
   if (!ok) failed += 1;
 }
 

@@ -28,3 +28,23 @@ export const markdownHtmlSchema = {
     ],
   },
 };
+
+/**
+ * README 里常见的**块级** HTML 标签。
+ *
+ * 【为什么不是「有 `<` 就开 HTML 解析」】开了 rehype-raw 之后，CommonMark 会把任何
+ * `<xxx>` 当标签：`vector<int>`、`List<T>`、`<Component prop={x} />` 里的尖括号部分
+ * 会被解析成未知元素，再被 sanitize 白名单删掉——正文直接少一截。AI 讲解 C++ 泛型、
+ * TS 泛型、JSX 时这种写法太常见，不能为了修 README 把对话内容吃掉。
+ *
+ * 所以只在这段文本确实出现了「README 才会有的块级标签」时才启用 HTML 解析：
+ * 命中就按标签渲染（可能吞掉同文档里的 `<int>`，与 GitHub 行为一致），
+ * 不命中就保持原样——`<` 老老实实当字符。
+ */
+const README_BLOCK_TAG =
+  /<(?:p|div|span|center|img|picture|source|details|summary|table|thead|tbody|tr|td|th|br|hr|blockquote|figure|figcaption)\b[^>]*>/i;
+
+/** 这段 Markdown 需不需要走 rehype-raw（见上面的取舍说明） */
+export function looksLikeHtmlBlock(content: string): boolean {
+  return README_BLOCK_TAG.test(content);
+}
