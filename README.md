@@ -432,7 +432,7 @@ ilo-agent-demo/
 | 首屏性能 | 候选池进程内缓存 + numpy 矩阵乘替换纯 Python 循环；`agent` 包 PEP 562 惰性导出，避免 import 就拖起 12 秒的重栈 |
 | 单端口同源 | FastAPI 直接托管前端产物并做 SPA 回退，跨域与 Cookie 问题一次性消失，部署只需一条隧道 |
 | 错误契约 | `ILOException` + 全局处理器产出 `{code, message, detail}`，路由声明 `response_model` 让错误信封进入 OpenAPI |
-| 第三方 HTML | 原文快照要渲染 README 的内联 HTML（居中块、徽章、折叠段），否则标签会被当纯文本吐出来；因此 `rehype-raw` 必须紧跟 `rehype-sanitize`（GitHub 同款白名单，`script`/`style` 整块 strip，`on*` 与 `javascript:` 清除），并由 `npm run check:sanitize` 守住这对约束 |
+| 第三方 HTML | 原文快照要渲染 README 的内联 HTML（居中块、徽章、折叠段），否则标签会被当纯文本吐出来；所以 `rehype-raw` 必须紧跟 `rehype-sanitize`（GitHub 同款白名单，`script`/`style` 整块 strip，`on*` 与 `javascript:` 清除），且只在文本里真的出现块级标签时才挂——否则 `vector<int>` 这类泛型写法会被当成未知标签删掉。`npm run check:sanitize` 守住这两条 |
 
 ---
 
