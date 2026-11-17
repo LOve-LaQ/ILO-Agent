@@ -1,21 +1,23 @@
 # 运行演示截图清单
 
-本目录用于存放 README 中「🖥️ 运行演示」章节引用的截图。
-按链路顺序放入对应文件名即可自动显示，**无需修改 README**。
+本目录存放 README 引用的截图。按文件名放入即可显示，**无需修改 README**。
 
-| 文件名 | 对应环节 | 建议拍摄内容 |
+| 文件名 | 对应环节 | 内容 |
 |---|---|---|
-| `00-swagger.png` | 启动自检 | `http://127.0.0.1:8000/docs` 接口总览（Discovery / Learning 两组） |
-| `01-feed.png` | 资讯推送 | 前端首页的资讯卡片流 |
-| `02-refresh.png` | 资讯推送 | 点击「刷新」时的进度提示（"通义千问提炼中文摘要…"） |
-| `03-session.png` | 学习讲解 | 点击「开始讲解」后的会话上下文 |
-| `04-chat.png` | 学习讲解 | AI 讲解对话面板 |
-| `05-quiz.png` | 测验评分 | 提交答案后的评分结果（curl / Swagger 响应） |
-| `06-fsrs.png` | FSRS 复习 | 复习计划与评级（curl / Swagger 响应） |
-| `07-flow.png` | 全链路 | 终端日志或页面组合图 |
+| `00-swagger.png` | API 总览 | `/docs` 接口总览（discover / auth / me / admin / learning 五组） |
+| `01-feed.png` | 推荐流 | 首页卡片流：标题、中文摘要、标签、星数 |
+| `02-refresh.png` | 抓取任务 | 点「抓取最新」后的阶段进度提示 |
+| `03-session.png` | 学习会话 | 会话号与驱动模型，刷新后由服务端恢复 |
+| `04-chat.png` | AI 解读 | 多轮追问；「资料里没有」体现检索边界 |
+| `05-quiz.png` | 测验评分 | Swagger 调用 `/learning/quiz` 的响应（逐题判定 + FSRS 间隔） |
+| `06-fsrs.png` | FSRS 复习 | `/learning/complete` 的评级与下次复习日期 |
+| `07-flow.png` | 全链路 | 后端日志：初始化 → 建会话 → 讲解 → 评分 → 归档 |
+| `08-ranking.png` | GitHub 新星榜 | 本周 · 全部语言，按日均涨星排序 |
+| `09-search.png` | 仓库搜索 | `vector database` 的筛选与结果列表 |
 
-## 拍摄建议
+## 拍摄约定
 
-- 统一分辨率（建议 1440 宽）与浏览器缩放，避免各图参差不齐
-- 终端截图建议浅色主题、放大字号，确保关键字段（`score` / `rating` / `new_interval`）清晰可读
-- 隐藏书签栏与个人信息，避免暴露本地隐私
+- 桌面端统一 1280 宽、隐藏滚动条；移动端用 CDP `Emulation.setDeviceMetricsOverride` 设 390×844
+  （`--window-size` 不等于真实视口，直接用它截移动端会误判成横向溢出）
+- 终端截图用深色主题、放大字号，确保 `score` / `rating` / `new_interval` 可读
+- 隐藏书签栏与个人信息；截图环境用 `CAPTCHA_PROVIDER=off RATE_LIMIT_ENABLED=false`，拍完改回
