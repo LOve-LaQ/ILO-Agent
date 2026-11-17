@@ -242,8 +242,10 @@ async def _personalized_items(
 async def get_recommended_news(
     request: Request,
     user: OptionalUser,
-    limit: int = 3,
-    offset: int = 0
+    # 必须有上下界：limit=-1 在 Python 切片里是「去掉最后一条」，limit=1000
+    # 会一次序列化上千条卡片 —— 这不是分页，是一个公开的响应体放大口。
+    limit: int = Query(3, ge=1, le=100, description="返回条数（1-100，默认 3）"),
+    offset: int = Query(0, ge=0, description="分页偏移（仅内置示例分支使用）"),
 ) -> Dict[str, Any]:
     """
     获取推荐资讯列表（登录且有画像时按兴趣排序，否则从知识库随机抽取「换一批」秒回）

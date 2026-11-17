@@ -71,6 +71,13 @@ class Settings(BaseSettings):
 
     # 入口加固（阶段 5）：限流与登录失败锁定
     # 限额配 0 或负数表示「该规则不生效」，便于排查时临时放行
+    #
+    # 可信代理白名单（逗号分隔 IP）：只有直连方在名单里才采信 X-Forwarded-For。
+    # 不设防的后果是实测过的 —— 同一个 IP 发第二个请求带一个不同的 XFF，
+    # 就拿到全新的限流桶，任何配额都能无限绕过。默认只信本机：cpolar / cloudflared
+    # 隧道客户端与 vite proxy 都跑在本机，注入的 XFF 才是真实来源；若服务在容器里、
+    # 前面还挂了 nginx，需要把那一跳的地址加进来（如 172.18.0.2）。
+    trusted_proxy_ips: str = "127.0.0.1,::1"
     rate_limit_enabled: bool = True
     register_rate_limit_per_hour: int = 5
     login_rate_limit_ip_per_15min: int = 20

@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { createBrowserRouter } from 'react-router-dom';
 
+import { RouteError } from './components/ui/RouteFallback';
 import { AccountDeletePage } from './features/auth/components/AccountDeletePage';
 import { AdminPage } from './features/admin/AdminPage';
 import { useAuthStore } from './features/auth/store';
@@ -79,26 +80,34 @@ function AdminRoute() {
 }
 
 export const router = createBrowserRouter([
-  { path: '/', element: <DiscoveryPage accountSlot={<AccountMenu />} /> },
-  { path: '/library', element: <LibraryRoute /> },
-  { path: '/admin', element: <AdminRoute /> },
-  { path: '/login', element: <LoginPage /> },
-  { path: '/register', element: <RegisterPage /> },
-  { path: '/forgot-password', element: <ForgotPasswordPage /> },
-  { path: '/reset-password', element: <ResetPasswordPage /> },
-  // 确认邮件链接落地页：可匿名访问（用户很可能在别的设备/未登录状态下点开邮件）
-  { path: '/verify-email', element: <VerifyEmailPage /> },
   {
-    // 账号安全（设备管理 / 改密 / 导出）必须登录：真正的边界在后端 /auth/* 与 /me/*
-    path: '/account/security',
-    element: (
-      <RequireAuth>
-        <AccountSecurityPage />
-      </RequireAuth>
-    ),
+    // pathless layout route：只为挂 errorElement，不改变任何子路由的 URL。
+    // 未匹配路由（404）与任意子路由渲染异常都落到这里；没有它，React Router 会把
+    // 给开发者看的 "Hey developer 👋" 提示直接渲染给用户。
+    errorElement: <RouteError />,
+    children: [
+      { path: '/', element: <DiscoveryPage accountSlot={<AccountMenu />} /> },
+      { path: '/library', element: <LibraryRoute /> },
+      { path: '/admin', element: <AdminRoute /> },
+      { path: '/login', element: <LoginPage /> },
+      { path: '/register', element: <RegisterPage /> },
+      { path: '/forgot-password', element: <ForgotPasswordPage /> },
+      { path: '/reset-password', element: <ResetPasswordPage /> },
+      // 确认邮件链接落地页：可匿名访问（用户很可能在别的设备/未登录状态下点开邮件）
+      { path: '/verify-email', element: <VerifyEmailPage /> },
+      {
+        // 账号安全（设备管理 / 改密 / 导出）必须登录：真正的边界在后端 /auth/* 与 /me/*
+        path: '/account/security',
+        element: (
+          <RequireAuth>
+            <AccountSecurityPage />
+          </RequireAuth>
+        ),
+      },
+      // 注销页可匿名访问：冷静期内账号已停用、无法登录，撤销注销需在此页用「标识 + 密码」自证
+      { path: '/account/delete', element: <AccountDeletePage /> },
+      { path: '/legal/privacy', element: <PrivacyPage /> },
+      { path: '/legal/terms', element: <TermsPage /> },
+    ],
   },
-  // 注销页可匿名访问：冷静期内账号已停用、无法登录，撤销注销需在此页用「标识 + 密码」自证
-  { path: '/account/delete', element: <AccountDeletePage /> },
-  { path: '/legal/privacy', element: <PrivacyPage /> },
-  { path: '/legal/terms', element: <TermsPage /> },
 ]);

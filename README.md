@@ -453,14 +453,14 @@ ilo-agent-demo/
 
 ```bash
 cd backend
-python -m pytest                             # 598 项通过（另有 2 项 eval 质量门禁默认 deselect）
+python -m pytest                             # 614 项通过（另有 2 项 eval 质量门禁默认 deselect）
 python -m pytest tests/test_search.py -v     # 单模块
 python -m pytest -m eval                     # 只跑 eval 门禁（会真实调用 LLM，花钱）
 ```
 
 `pytest.ini` 里的 `addopts = -m "not eval"` 把 `evals/` 的 LLM-as-judge 评测挡在默认回归之外——它是质量门禁，不是单元测试，不该每次跑测试都产生账单。
 
-598 是本机 PostgreSQL 已起、Redis / Qdrant 已起时的数字；走真实库的几个文件（`test_auth.py`、`test_authz.py`、`test_admin_flags.py` 等）在 `DATABASE_URL` 不可用时整文件 `skipif`，数量会相应变少。
+614 是本机 PostgreSQL 已起、Redis / Qdrant 已起时的数字；走真实库的几个文件（`test_auth.py`、`test_authz.py`、`test_admin_flags.py` 等）在 `DATABASE_URL` 不可用时整文件 `skipif`，数量会相应变少。
 
 37 个测试文件按关注点划分，不是按文件划分：
 
@@ -510,7 +510,7 @@ cpolar.exe http 8000        # https://xxxx.r3.cpolar.cn -> http://localhost:8000
 
 演示前 checklist：`COOKIE_SECURE=true`（HTTPS 下必须）→ 手机 4G 打开隧道域名 → 登录、刷新、进会话，确认不掉登录 → 打开 `RATE_LIMIT_ENABLED` 与 `CAPTCHA_PROVIDER`，公开链接会被爬虫刷 LLM 成本。
 
-`src/core/net.py` 优先取 `X-Forwarded-For` 首地址，穿透后限流仍按真实访客 IP 计算。
+`src/core/net.py` 只在**直连方是可信代理**时才采信 `X-Forwarded-For` 首地址（白名单 `TRUSTED_PROXY_IPS`，默认 `127.0.0.1,::1`），这样穿透后限流按真实访客 IP 计算，同时公网直连者换个请求头也换不到新计数桶。若前面还挂了 nginx 或容器代理，要把那一跳的地址加进白名单，否则 XFF 会被忽略、全站共用一个桶。
 
 ### 容器
 

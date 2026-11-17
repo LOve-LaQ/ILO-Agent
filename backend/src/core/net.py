@@ -1,9 +1,11 @@
 # Net - 请求来源信息
 """客户端 IP 的提取与脱敏（阶段 5：入口加固 + 个人信息保护）。
 
-**提取**：优先 `X-Forwarded-For` 首个地址。经 vite 代理或反向代理时
-`request.client.host` 永远是代理地址（127.0.0.1），拿它做限流等于全站共用一个
-计数桶；XFF 由代理追加，取第一个才是原始客户端。
+**提取**：只有在直连方是可信代理时才采信 `X-Forwarded-For` 首个地址。
+经 vite 代理 / cpolar 隧道 / nginx 时 `request.client.host` 是代理地址（127.0.0.1），
+拿它做限流等于全站共用一个计数桶；XFF 由代理追加，取第一个才是原始客户端。
+但无条件采信 XFF 是实打实的漏洞：任何人换个请求头就换一个限流桶，实测可无限绕过。
+白名单见 `settings.trusted_proxy_ips`，默认只信本机。
 
 **脱敏**：落库前一律走 `hash_ip()`。为什么不能存明文、也不能用无盐哈希：
 - 明文 IP 属个人信息，库被拖走就等于泄露访问者的网络位置；
@@ -15,6 +17,8 @@ HMAC 使用独立 secret（`IP_HASH_SECRET`，不复用 `JWT_SECRET`），两套
 
 import hashlib
 import hmac
+import ipaddress
+from functools import lru_cache
 from typing import Optional
 
 from src.core.config import settings
@@ -26,16 +30,47 @@ STORED_HASH_LENGTH = 32
 RATE_LIMIT_KEY_LENGTH = 24
 
 
+def _normalize_ip(value: str) -> Optional[str]:
+    """规范化 IP 文本；解析不了就返回 None。
+
+    Windows 上 IPv4 映射地址会写成 `::ffff:127.0.0.1`，不归一化的话它会和白名单里的
+    `127.0.0.1` 比不上， tunnel 场景下限流又退回「全站共用一个桶」。
+    """
+    try:
+        addr = ipaddress.ip_address(value.strip())
+    except ValueError:
+        return None
+    if isinstance(addr, ipaddress.IPv6Address) and addr.ipv4_mapped:
+        addr = addr.ipv4_mapped
+    return str(addr)
+
+
+@lru_cache(maxsize=8)
+def _trusted_proxies(raw: str) -> frozenset[str]:
+    """解析白名单；按原始字符串缓存，改配置后自然拿到新结果。
+
+    无效条目直接跳过而不是抛错：配置写错一个地址不该让全站请求 500。
+    """
+    result = set()
+    for part in raw.split(","):
+        normalized = _normalize_ip(part)
+        if normalized:
+            result.add(normalized)
+    return frozenset(result)
+
+
 def client_ip(request) -> Optional[str]:
-    """真实客户端 IP：优先 X-Forwarded-For 首个地址，否则直连地址"""
+    """真实客户端 IP：直连方可信时才用 XFF 首个地址，否则用直连地址"""
     if request is None:
         return None
-    forwarded = request.headers.get("x-forwarded-for")
-    if forwarded:
-        first = forwarded.split(",")[0].strip()
-        if first:
-            return first
-    return request.client.host if request.client else None
+    peer = request.client.host if request.client else None
+    if peer and _normalize_ip(peer) in _trusted_proxies(settings.trusted_proxy_ips):
+        forwarded = request.headers.get("x-forwarded-for")
+        if forwarded:
+            first = forwarded.split(",")[0].strip()
+            if first:
+                return first
+    return peer
 
 
 def _digest(secret: str, value: str, length: int) -> str:
