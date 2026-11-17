@@ -1,0 +1,88 @@
+{
+  "generatedAt": "2026-11-17T10:08:15.803Z",
+  "total": {
+    "raw": 855327,
+    "gzip": 249582
+  },
+  "byKind": {
+    "markdown": {
+      "raw": 345693,
+      "gzip": 98550,
+      "files": 1
+    },
+    "vendor": {
+      "raw": 178302,
+      "gzip": 55583,
+      "files": 1
+    },
+    "entry": {
+      "raw": 135550,
+      "gzip": 40963,
+      "files": 1
+    },
+    "router": {
+      "raw": 96641,
+      "gzip": 31647,
+      "files": 1
+    },
+    "css": {
+      "raw": 62908,
+      "gzip": 12066,
+      "files": 1
+    },
+    "state": {
+      "raw": 35517,
+      "gzip": 10345,
+      "files": 1
+    },
+    "runtime": {
+      "raw": 716,
+      "gzip": 428,
+      "files": 1
+    }
+  },
+  "files": [
+    {
+      "name": "markdown-1ciKu1k8.js",
+      "kind": "markdown",
+      "raw": 345693,
+      "gzip": 98550
+    },
+    {
+      "name": "vendor-DbJfEHYf.js",
+      "kind": "vendor",
+      "raw": 178302,
+      "gzip": 55583
+    },
+    {
+      "name": "index-B5S5md5R.js",
+      "kind": "entry",
+      "raw": 135550,
+      "gzip": 40963
+    },
+    {
+      "name": "router-CcAqCtLg.js",
+      "kind": "router",
+      "raw": 96641,
+      "gzip": 31647
+    },
+    {
+      "name": "index-RGEr4gqq.css",
+      "kind": "css",
+      "raw": 62908,
+      "gzip": 12066
+    },
+    {
+      "name": "state-BMvLThYR.js",
+      "kind": "state",
+      "raw": 35517,
+      "gzip": 10345
+    },
+    {
+      "name": "rolldown-runtime-hePW80VL.js",
+      "kind": "runtime",
+      "raw": 716,
+      "gzip": 428
+    }
+  ]
+}

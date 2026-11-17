@@ -478,7 +478,12 @@ python -m pytest -m eval                     # 只跑 eval 门禁（会真实调
 
 `test_async_no_blocking_io.py` 专门守「异步路由里不许出现同步阻塞调用」，`test_timeout_budget.py` 顺带守住「每个配置项都必须在 `.env.example` 里出现」——这条守卫在我漏写配置文档时真的报过错。
 
-前端没有单测，只有 `tsc -b` 类型检查、`npm run build`，以及 `npm run check:sanitize`——它跑一遍 Markdown 渲染管线，确认 README 里的内联 HTML 能被渲染、而 `script` / `on*` / `javascript:` 被清掉；界面用手动截图核对（桌面 1280 / 移动 390 两档）。
+前端没有单测，只有 `tsc -b` 类型检查、`npm run build`，以及两个守卫脚本：
+
+- `npm run check:sanitize`：跑一遍 Markdown 渲染管线，确认 README 里的内联 HTML 能被渲染、而 `script` / `on*` / `javascript:` 被清掉
+- `npm run bundle:report [-- --save <name>]`：用 `node:zlib` 按 gzip level 9 算产物体积，快照落进 `docs/bundle/`，拆分前后用同一把尺子对比（见 `docs/bundle/COMPARISON.md`）
+
+界面用手动截图核对（桌面 1280 / 移动 390 两档）。
 
 ---
 
@@ -562,7 +567,8 @@ PostgreSQL 必需（账号、收藏、会话、成本台账）。Redis 缺失时
 
 **近期**
 - [ ] 前端补齐「测验 → FSRS 复习计划」界面，打通学习闭环
-- [ ] 前端代码分割：当前单 chunk 793 KB（gzip 239 KB），vite 报超 500 KB 警告
+- [x] 前端分包：按依赖边界切成 vendor/router/state/markdown/entry 五块，最大块 346 KB，消除 500 KB 警告（见 `docs/bundle/COMPARISON.md`）
+- [ ] 首屏按需加载：markdown 块（gzip 96 KB）目前仍被 `modulepreload` 预取，改成动态 import 后首屏可再省这块——但抽屉在首页常驻，需一并改挂载方式
 
 **中期**
 - [ ] 检索质量评测纳入 CI：`evals/` 已有数据集与判分脚本，缺自动门禁

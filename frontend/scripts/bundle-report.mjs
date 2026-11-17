@@ -29,6 +29,8 @@ const gzipSize = (buf) => gzipSync(buf, { level: 9 }).length;
 
 function classify(name) {
   if (/\.css$/.test(name)) return 'css';
+  // Rolldown 会为跨 chunk 的模块加载生成极小的运行时桥接，归到 runtime 而非 other
+  if (/^rolldown-runtime-/.test(name)) return 'runtime';
   // chunk 命名约定见 vite.config.ts 的 manualChunks；未归类的落到 entry/other
   if (/^vendor-/.test(name)) return 'vendor';
   if (/^markdown-/.test(name)) return 'markdown';
