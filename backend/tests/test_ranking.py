@@ -11,6 +11,7 @@
 CI 里还会因为外网不可达而随机红灯 —— 单元测试不能依赖别人的服务。
 """
 
+import asyncio
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List
 
@@ -262,3 +263,29 @@ def test_corrupted_cache_is_treated_as_miss(client, fake_redis, ranking_fetch):
     body = client.get("/api/v1/discover/rankings?window=week").json()
     assert body["source"] == "github"
     assert fake_redis.get(discover_routes._ranking_cache_key("week", "all"))
+
+
+# ================================================================ 排序口径
+def test_fetch_ranking_sorts_by_stars_per_day(monkeypatch):
+    """榜单按「日均涨星」排序，而不是 GitHub 返回的累计星数
+
+    周窗口里两者会分叉：7 天龄 3000 星（≈429/天）热度低于 1 天龄 500 星（500/天），
+    但 GitHub 的 sort=stars 会把前者排在前面 —— 照单全收的话 rank 就不再代表
+    「本周最热」，而是一个「谁创建得早谁靠前」的排序。这里锁住重排逻辑。
+    """
+    now = datetime.now(timezone.utc)
+    veteran = _repo(1, stars=3000, created_hours_ago=24 * 7, base=now)
+    newcomer = _repo(2, stars=500, created_hours_ago=24, base=now)
+
+    async def _fake_search(params):
+        return {"items": [veteran, newcomer], "total_count": 2}, "42"
+
+    monkeypatch.setattr(gr, "_search_once", _fake_search)
+    result = asyncio.run(gr.fetch_ranking("week", "all", limit=5))
+
+    assert [item["full_name"] for item in result["items"]] == [
+        "owner2/repo2",
+        "owner1/repo1",
+    ]
+    # rank 必须在重排之后赋值，否则前端序号会与列表顺序对不上
+    assert [item["rank"] for item in result["items"]] == [1, 2]

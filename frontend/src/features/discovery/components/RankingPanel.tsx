@@ -69,8 +69,8 @@ export function RankingPanel() {
           </h1>
           <div className={styles.meta}>
             {data?.window_start
-              ? `统计 ${data.window_start} 之后创建的仓库 · 按 star 总数排序`
-              : `${WINDOW_HINT[window]}创建的高星仓库 · 按 star 总数排序`}
+              ? `统计 ${data.window_start} 之后创建的仓库 · 按日均涨星排序`
+              : `${WINDOW_HINT[window]}创建的高星仓库 · 按日均涨星排序`}
           </div>
         </div>
 

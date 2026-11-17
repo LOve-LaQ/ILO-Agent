@@ -224,10 +224,13 @@ async def fetch_ranking(
 
     now = datetime.now(timezone.utc)
     raw_items = data.get("items") or []
-    items = [
-        build_item(repo, rank, now=now)
-        for rank, repo in enumerate(raw_items[: params["per_page"]], start=1)
-    ]
+    items = [build_item(repo, 0, now=now) for repo in raw_items[: params["per_page"]]]
+
+    # GitHub 只能按累计星数排，但 7 天窗口里「1 天龄 500 星」比「7 天龄 3000 星」更热：
+    # 按日均涨星重排，rank 在重排之后才赋值。sort 是稳定的，同分保持 GitHub 原顺序。
+    items.sort(key=lambda item: item.get("stars_per_day") or 0.0, reverse=True)
+    for rank, item in enumerate(items, start=1):
+        item["rank"] = rank
 
     return {
         "query": query,
