@@ -1,20 +1,56 @@
-# Docker Compose for ILO-Agent Demo
-# 一键启动所有服务:
-# - Redis (缓存)
-# - Qdrant (向量数据库)
-# - FastAPI Backend (可选，本地运行更方便)
+# ILO-Agent Demo —— 一键起全套（含应用本身）
+#
+#   cp backend/.env.example backend/.env   # 至少填 DATABASE_URL 里的口令、JWT_SECRET、LLM key
+#   docker compose up -d --build
+#   打开 http://localhost:8000
+#
+# 对外只暴露 8000：FastAPI 同源托管前端，内网穿透时只需给 cpolar 一条隧道。
+# Redis / Qdrant 只绑 127.0.0.1（本机 start_dev.py 仍可探活，公网不可见）；
+# PostgreSQL 不映射宿主端口（本机已有 16/18 实例在 5432，避免冲突）。
+# IMPORTANT: 生产必须设 JWT_SECRET、COOKIE_SECURE=true（HTTPS），并改掉下方 PG 口令。
 
-version: '3.8'
+x-app-env: &app-env
+  # 容器内部走服务名，不复用 .env 里的 127.0.0.1（那是给本机开发用的）
+  DATABASE_URL: postgresql+psycopg2://ilo:ilo_dev_2026@postgres:5432/ilo_agent
+  REDIS_URL: redis://redis:6379/0
+  QDRANT_URL: http://qdrant:6333
+  # Docker 网桥地址随宿主变化，放行整个网段，隧道注入的 XFF 才能用于限流
+  TRUSTED_PROXY_IPS: 127.0.0.1,::1,172.16.0.0/12,192.168.0.0/16
+  SERVE_FRONTEND: "true"
+  FRONTEND_DIST: /app/frontend/dist
 
 services:
-  # Redis - 短期记忆存储
+  # 应用：前端 + 后端在同一个镜像、同一个端口
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ilo-agent-api
+    restart: unless-stopped
+    env_file:
+      # 文件缺失也能起（用默认口令/空 key 降级运行），填了才带入真实 key
+      - path: ./backend/.env
+        required: false
+    environment:
+      <<: *app-env
+    ports:
+      - "${API_PORT:-8000}:8000"
+    depends_on:
+      redis:
+        condition: service_healthy
+      qdrant:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+
+  # 短期记忆 / 缓存 / 限流计数
   redis:
-    image: redis:alpine
+    image: redis:7-alpine
     container_name: ilo-agent-redis
-    # Docker Desktop 重启后容器会被停止且不会自恢复，必须显式声明重启策略
     restart: unless-stopped
     ports:
-      - "6379:6379"
+      # 只绑回环：本机开发可连，公网扫不到
+      - "127.0.0.1:6379:6379"
     volumes:
       - redis_data:/data
     command: redis-server --appendonly yes
@@ -24,15 +60,13 @@ services:
       timeout: 5s
       retries: 5
 
-  # Qdrant - 向量数据库（长期记忆）
+  # 长期记忆 / 向量检索
   qdrant:
-    image: qdrant/qdrant
+    image: qdrant/qdrant:v1.15.4
     container_name: ilo-agent-qdrant
-    # 同上：没有重启策略时，Docker Desktop 一重启 Qdrant 就静默停摆，
-    # 首页会降级成 FALLBACK_NEWS 的 3 条示例卡片
     restart: unless-stopped
     ports:
-      - "6333:6333"
+      - "127.0.0.1:6333:6333"
     volumes:
       - qdrant_data:/qdrant/storage
     healthcheck:
@@ -42,9 +76,27 @@ services:
       timeout: 5s
       retries: 5
 
+  # 用户体系 / 收藏 / 学习记录（此前是本机实例，容器化后一份依赖更少）
+  postgres:
+    image: postgres:16-alpine
+    container_name: ilo-agent-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ilo
+      POSTGRES_PASSWORD: ilo_dev_2026
+      POSTGRES_DB: ilo_agent
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ilo -d ilo_agent"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
 volumes:
   redis_data:
   qdrant_data:
+  postgres_data:
 
 networks:
   default:

@@ -409,7 +409,9 @@ ilo-agent-demo/
 │       ├── shared/                  # api 客户端、类型、hooks、格式化
 │       └── routes.tsx               # 路由表 = 组合根（跨 feature 只在这里组装）
 ├── docs/images/                     # README 截图
-├── docker-compose.yml               # Redis + Qdrant
+├── Dockerfile                       # 两阶段：Node 构建前端 → 3.13 后端同源托管
+├── docker-compose.yml               # api + Redis + Qdrant + PostgreSQL
+├── docker/entrypoint.sh             # 等库就绪 → Alembic 迁移 → exec uvicorn
 └── QUICKSTART.md                    # 建库、迁移、密钥的详细步骤
 ```
 
@@ -512,9 +514,28 @@ cpolar.exe http 8000        # https://xxxx.r3.cpolar.cn -> http://localhost:8000
 
 `src/core/net.py` 只在**直连方是可信代理**时才采信 `X-Forwarded-For` 首地址（白名单 `TRUSTED_PROXY_IPS`，默认 `127.0.0.1,::1`），这样穿透后限流按真实访客 IP 计算，同时公网直连者换个请求头也换不到新计数桶。若前面还挂了 nginx 或容器代理，要把那一跳的地址加进白名单，否则 XFF 会被忽略、全站共用一个桶。
 
-### 容器
+### 容器（一条命令起整套）
 
-`docker-compose.yml` 目前只编排 Redis 与 Qdrant。应用镜像的 Dockerfile 尚未修正（依赖路径与基镜像版本都需要改），所以**不要**指望 `docker compose up` 能起整套——这是已知待办。
+```bash
+cp backend/.env.example backend/.env   # 至少填 JWT_SECRET 与 LLM Key；DATABASE_URL 会被 compose 覆盖为容器地址
+docker compose up -d --build
+# 打开 http://localhost:8000 —— 前端与 API 同源，对外只有这一个端口
+```
+
+镜像是两阶段构建：`node:22-alpine` 跑 `npm ci && npm run build`，`python:3.13-slim` 装后端依赖并托管上一步的 `dist/`。compose 编排四个服务：
+
+| 服务 | 作用 | 端口暴露 |
+|---|---|---|
+| `api` | 前端 + FastAPI 同源 | `${API_PORT:-8000}`，唯一对外端口 |
+| `redis` | 会话 / 缓存 / 限流 | 仅 `127.0.0.1:6379`（本机开发仍可探活） |
+| `qdrant` | 向量记忆 | 仅 `127.0.0.1:6333` |
+| `postgres` | 用户 / 收藏 / 成本台账 | 不映射宿主（本机已有实例，避免 5432 冲突） |
+
+`docker/entrypoint.sh` 会先等 PostgreSQL 可连，跑 `alembic upgrade head`，再 `exec uvicorn`——不用手动建表。容器网络里 `TRUSTED_PROXY_IPS` 放行了 Docker 网桥网段（`172.16.0.0/12`），保证隧道注入的 XFF 仍用于限流分桶。
+
+⚠️ 生产上线前必须改三处：compose 里的 `POSTGRES_PASSWORD` 与 `DATABASE_URL` 口令（当前是开发默认值）、`JWT_SECRET`（至少 32 字节）、`COOKIE_SECURE=true`（HTTPS）。此外 compose 用 `env_file` 可选加载 `backend/.env` 带入真实 Key，文件不存在也能以降级模式启动。
+
+> 构建环境提示：若 Docker daemon 配了失效的代理，`docker compose build` 会在拉基础镜像阶段失败（报 `app settings HTTPS proxy ... refused`）。此时需要在 Docker Desktop 设置里修正代理或配置国内镜像源——这是本机环境问题，与镜像本身无关。
 
 ---
 
@@ -541,7 +562,7 @@ PostgreSQL 必需（账号、收藏、会话、成本台账）。Redis 缺失时
 
 **近期**
 - [ ] 前端补齐「测验 → FSRS 复习计划」界面，打通学习闭环
-- [ ] 修正 Dockerfile，让 `docker compose up -d` 能起整套（含 PostgreSQL 与自动迁移）
+- [ ] 前端代码分割：当前单 chunk 793 KB（gzip 239 KB），vite 报超 500 KB 警告
 
 **中期**
 - [ ] 检索质量评测纳入 CI：`evals/` 已有数据集与判分脚本，缺自动门禁

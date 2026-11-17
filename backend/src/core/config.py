@@ -76,7 +76,8 @@ class Settings(BaseSettings):
     # 不设防的后果是实测过的 —— 同一个 IP 发第二个请求带一个不同的 XFF，
     # 就拿到全新的限流桶，任何配额都能无限绕过。默认只信本机：cpolar / cloudflared
     # 隧道客户端与 vite proxy 都跑在本机，注入的 XFF 才是真实来源；若服务在容器里、
-    # 前面还挂了 nginx，需要把那一跳的地址加进来（如 172.18.0.2）。
+    # 前面还挂了 nginx，需要把那一跳的地址/网段加进来（如 172.18.0.2 或 172.16.0.0/12）。
+    # 支持单个 IP 与 CIDR，无效条目会被跳过。
     trusted_proxy_ips: str = "127.0.0.1,::1"
     rate_limit_enabled: bool = True
     register_rate_limit_per_hour: int = 5

@@ -1,0 +1,52 @@
+# Git 与 IDE
+.git
+.gitignore
+.vscode
+.idea
+
+# 本地 Python 环境 / 备份（这两个加起来 2GB+，绝不进构建上下文）
+backend/ilo/
+backend/_local_backup/
+_local_backup/
+**/__pycache__/
+**/*.py[cod]
+.venv/
+venv/
+
+# 密钥：镜像里绝不打包 .env，连接串由 compose 注入
+backend/.env
+**/.env.local
+
+# 运行产物
+**/logs/
+**/*.log
+.pytest_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# 前端：dist 在镜像内重新构建，node_modules 由 npm ci 装
+frontend/node_modules/
+frontend/dist/
+
+# 文档 / 个人材料（求职材料不进公开镜像）
+docs/
+.workbuddy/
+.workbuddy-ai/
+COMMIT_PLAN.md
+QUICKSTART.md
+*.docx
+
+# 后端开发期脚本与评测产物（运行只需要 src / alembic / requirements）
+backend/tests/
+backend/evals/
+backend/audit_*.py
+backend/backfill_*.py
+backend/rag_*.py
+backend/retrieval_*.py
+backend/retrieval_*.json
+backend/build_retrieval_cases.py
+backend/news_scheduler.py
+backend/retention_cleanup.py
+backend/start_dev.py
+backend/*.md

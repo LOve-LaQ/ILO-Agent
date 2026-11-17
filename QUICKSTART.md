@@ -9,13 +9,17 @@
 Python 3.11+                  # 本项目在 Python 3.13 上开发验证
 PostgreSQL 14+                # 阶段 2 起必需：用户注册 / 登录
 Node.js 20.19+ (或 22.12+)   # Vite 8 的硬性要求，18.x 会直接启动失败
-Docker (可选，仅用于 Redis/Qdrant)
+Docker (可选：本地开发只起依赖服务；也可一条命令起整套含应用)
 
 # 验证
 python --version
 node --version
 docker --version  # 可选
 ```
+
+> **只想马上看效果？** 若已装 Docker，可直接 `cp backend/.env.example backend/.env && docker compose up -d --build`，
+> 打开 `http://localhost:8000` 即是完整站点（前端 + API 同源，含 PostgreSQL 自动迁移）。
+> 下面的步骤是**本地开发**（vite:5173 + uvicorn:8000 双端口）的详细流程，适合要改代码的情况。
 
 ---
 
@@ -33,16 +37,19 @@ cd ILO-Agent
 #### **选项 A: 使用 Docker（推荐）**
 
 ```bash
-# 一键启动所有服务
-docker-compose up -d
+# 只起依赖服务（本地开发用，应用仍走下面的 uvicorn + vite）
+docker compose up -d redis qdrant
 
 # 查看状态
-docker-compose ps
+docker compose ps
 
 # 预期输出
-redis         # ✅ running
 qdrant        # ✅ running
+redis         # ✅ running
 ```
+
+> 若要把**应用本身**也交给 Docker（含 PostgreSQL 与自动迁移），改成 `docker compose up -d --build`，
+> 然后直接跳到打开 `http://localhost:8000`，无需再执行后面的本地安装与启动步骤。
 
 #### **选项 B: 本地安装（备选）**
 

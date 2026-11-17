@@ -5,7 +5,8 @@
 经 vite 代理 / cpolar 隧道 / nginx 时 `request.client.host` 是代理地址（127.0.0.1），
 拿它做限流等于全站共用一个计数桶；XFF 由代理追加，取第一个才是原始客户端。
 但无条件采信 XFF 是实打实的漏洞：任何人换个请求头就换一个限流桶，实测可无限绕过。
-白名单见 `settings.trusted_proxy_ips`，默认只信本机。
+白名单见 `settings.trusted_proxy_ips`，默认只信本机，支持 CIDR 网段
+（容器部署时把 Docker 网桥网段加进来，否则 XFF 被忽略、全站共用一个桶）。
 
 **脱敏**：落库前一律走 `hash_ip()`。为什么不能存明文、也不能用无盐哈希：
 - 明文 IP 属个人信息，库被拖走就等于泄露访问者的网络位置；
@@ -46,17 +47,31 @@ def _normalize_ip(value: str) -> Optional[str]:
 
 
 @lru_cache(maxsize=8)
-def _trusted_proxies(raw: str) -> frozenset[str]:
-    """解析白名单；按原始字符串缓存，改配置后自然拿到新结果。
+def _trusted_networks(raw: str) -> tuple:
+    """解析白名单为网段；按原始字符串缓存，改配置后自然拿到新结果。
 
-    无效条目直接跳过而不是抛错：配置写错一个地址不该让全站请求 500。
+    支持 CIDR（如 `172.16.0.0/12`）：Docker 网桥地址随宿主而异，写死单个 IP
+    会在换了机器后静默失效 —— 那时 XFF 被忽略、全站共用一个限流桶，且没有任何
+    报错。无效条目直接跳过：配置写错一个地址不该让全站请求 500。
     """
-    result = set()
+    result = []
     for part in raw.split(","):
-        normalized = _normalize_ip(part)
-        if normalized:
-            result.add(normalized)
-    return frozenset(result)
+        part = part.strip()
+        if not part:
+            continue
+        try:
+            result.append(ipaddress.ip_network(part, strict=False))
+        except ValueError:
+            continue
+    return tuple(result)
+
+
+def _is_trusted_proxy(peer: Optional[str]) -> bool:
+    normalized = _normalize_ip(peer or "")
+    if not normalized:
+        return False
+    addr = ipaddress.ip_address(normalized)
+    return any(addr in net for net in _trusted_networks(settings.trusted_proxy_ips))
 
 
 def client_ip(request) -> Optional[str]:
@@ -64,7 +79,7 @@ def client_ip(request) -> Optional[str]:
     if request is None:
         return None
     peer = request.client.host if request.client else None
-    if peer and _normalize_ip(peer) in _trusted_proxies(settings.trusted_proxy_ips):
+    if _is_trusted_proxy(peer):
         forwarded = request.headers.get("x-forwarded-for")
         if forwarded:
             first = forwarded.split(",")[0].strip()

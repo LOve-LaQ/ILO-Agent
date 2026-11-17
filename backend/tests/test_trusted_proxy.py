@@ -77,6 +77,16 @@ def test_custom_proxy_allowlist(monkeypatch):
     assert net.client_ip(_request("127.0.0.1", {"x-forwarded-for": "8.8.8.8"})) == "127.0.0.1"
 
 
+def test_cidr_allowlist_for_docker_bridge(monkeypatch):
+    """容器网桥地址不固定，必须能按网段授信，否则全站共用一个限流桶"""
+    monkeypatch.setattr(settings, "trusted_proxy_ips", "127.0.0.1,172.16.0.0/12")
+    assert (
+        net.client_ip(_request("172.18.0.5", {"x-forwarded-for": "203.0.113.40"}))
+        == "203.0.113.40"
+    )
+    assert net.client_ip(_request("10.0.0.5", {"x-forwarded-for": "8.8.8.8"})) == "10.0.0.5"
+
+
 def test_malformed_allowlist_does_not_break_requests(monkeypatch):
     monkeypatch.setattr(settings, "trusted_proxy_ips", "not-an-ip, ,127.0.0.1")
     assert (
