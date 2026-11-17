@@ -62,7 +62,9 @@ services:
 
   # 长期记忆 / 向量检索
   qdrant:
-    image: qdrant/qdrant:v1.15.4
+    # 与 qdrant-client 1.20 及本机既有数据格式对齐。
+    # v1.15 读不了 v1.19 写的 InRamMmap 段（启动直接 panic），别往回调。
+    image: qdrant/qdrant:v1.19.1
     container_name: ilo-agent-qdrant
     restart: unless-stopped
     ports:
