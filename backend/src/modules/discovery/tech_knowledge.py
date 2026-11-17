@@ -478,6 +478,96 @@ class TechKnowledgeBase:
                 vectors[str(item_id)] = list(vector)
         return vectors
 
+    def similar_items(
+        self,
+        item_id: str,
+        item_type: Optional[str] = None,
+        limit: int = 10,
+        min_score: float = 0.0,
+        deadline: Optional[float] = None,
+    ) -> Dict[str, Any]:
+        """按向量近邻找相似卡片，返回 `{"items": [...], "reason": str|None}`
+
+        为什么走 Qdrant 原生检索而不是拿候选池自己算矩阵乘：
+        - 候选池只取固定 500 条，库里超出部分**永远不可能**被召回；HNSW 索引则扫全库；
+        - 候选池是「为了首页个性化排序」调的，把它的容量当作相似推荐的召回范围，
+          等于让两个不相干的需求互相限制。
+
+        三处必须做对的细节：
+
+        1. **排除自身**。源卡片与自己的余弦恒为 1.0，不排除就永远占掉第一条。
+        2. **同类型过滤**。仓库的「相似」应该是另一个仓库；把文章混进来的结果
+           对「接着看哪个项目」没有任何帮助。
+        3. **阈值在服务端生效**（`score_threshold`）。在客户端过滤等于先把
+           limit 条捞满再丢掉一半，最终很可能只剩两三条 —— 让 Qdrant 直接
+           按阈值召回，才能补足条数。
+
+        Returns:
+            `{"items": [{"payload": {...}, "score": float}], "reason": None}`
+            取不到源向量或 Qdrant 不可用时 `items` 为空，`reason` 说明原因
+            （`no_vector` / `unavailable`），由调用方决定是隐藏还是报错。
+        """
+        key = str(item_id)
+        # 复用 get_vectors_by_ids：它已经带了熔断 + 一次瞬时故障重试，
+        # 且保证取的是**入库时那份**向量（重新 embed 可能与库里的不在同一空间）
+        vectors = self.get_vectors_by_ids([key], deadline=deadline)
+        vector = vectors.get(key)
+        if not vector:
+            return {"items": [], "reason": "no_vector"}
+
+        if circuit_breaker.is_open(circuit_breaker.QDRANT_READ):
+            logger.warning(
+                "[WARN] event=circuit_open downstream=qdrant_read action=skip scope=similar"
+            )
+            return {"items": [], "reason": "unavailable"}
+
+        must = []
+        if item_type:
+            must.append(FieldCondition(key="type", match=MatchValue(value=item_type)))
+        # 用 payload 里的 id 排除自身，而不是 HasIdCondition：point id 是
+        # md5(id) 前 16 位的整数，这里重算一遍等于把「寻址方式」抄到第二个地方，
+        # 一旦 upsert 侧改动就会静默失效
+        must_not = [FieldCondition(key="id", match=MatchValue(value=key))]
+
+        _started = time.monotonic()
+        try:
+            result = with_retry_sync(
+                lambda: self.qdrant.query_points(
+                    collection_name=COLLECTION,
+                    query=vector,
+                    query_filter=Filter(must=must or None, must_not=must_not),
+                    limit=max(1, limit),
+                    with_payload=True,
+                    with_vectors=False,
+                    score_threshold=min_score if min_score > 0 else None,
+                    # 读路径用 qdrant_timeout（4s），不是写路径的 6s
+                    timeout=qdrant_timeout_seconds(settings.qdrant_timeout),
+                ),
+                attempts=1,
+                base_delay=0.3,
+                retry_on=QDRANT_TRANSIENT,
+                label="qdrant_read",
+                deadline=deadline,
+            )
+        except Exception as e:  # noqa: BLE001 - 相似推荐是可选的增强，不该拖垮页面
+            circuit_breaker.record_failure(circuit_breaker.QDRANT_READ)
+            log_downstream_failure(
+                downstream="qdrant_read",
+                exc=e,
+                elapsed_ms=(time.monotonic() - _started) * 1000,
+                scope="similar",
+            )
+            return {"items": [], "reason": "unavailable"}
+        circuit_breaker.record_success(circuit_breaker.QDRANT_READ)
+
+        points = getattr(result, "points", None) or []
+        items = [
+            {"payload": p.payload or {}, "score": float(p.score)}
+            for p in points
+            if p.payload
+        ]
+        return {"items": items, "reason": None}
+
     def get_by_ids(self, item_ids) -> Dict[str, Dict[str, Any]]:
         """批量按 id 查询，返回 {item_id: payload}。
 

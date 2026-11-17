@@ -15,7 +15,7 @@
 - **读完就忘**：看完一个仓库的介绍，一周后只记得名字
 - **AI 解释不可信**：让模型自由发挥，分不清哪句来自原文、哪句是编的
 
-项目的应对方式是四条链路：**发现**（定时抓取 + 去重 + 中文摘要）、**查询**（榜单与关键词检索）、**推荐**（兴趣画像向量排序 + 推荐理由）、**解读**（RAG 溯源式讲解）。所有 LLM 调用都有成本台账，所有外部依赖都有降级路径。
+项目的应对方式是五条链路：**发现**（定时抓取 + 去重 + 中文摘要）、**查询**（榜单与关键词检索）、**推荐**（兴趣画像向量排序 + 推荐理由）、**延伸**（相似项目向量近邻）、**解读**（RAG 溯源式讲解）。所有 LLM 调用都有成本台账，所有外部依赖都有降级路径。
 
 ---
 
@@ -27,6 +27,7 @@
 | **主线** | 首页推荐流：兴趣画像向量个性化排序 + 推荐理由 | ✅ |
 | **主线** | GitHub 新星榜：本周 / 本月 × 8 种语言，按日均涨星排 | ✅ |
 | **主线** | 关键词搜索：语言 / 星数 / 排序筛选，支持 `topic:` `language:` 限定符 | ✅ |
+| **主线** | 相似项目推荐：按当前卡片向量查近邻，抽屉底部「接着该看什么」 | ✅ |
 | **主线** | 卡片解读 + 溯源（`provenance` / `digest` / `content`） | ✅ |
 | **主线** | 收藏 / 资料库 / 学习历史 | ✅ |
 | **支撑** | 双 Token 认证、限流、验证码、账号生命周期（改密 / 注销 / 数据导出） | ✅ |
@@ -249,11 +250,36 @@ GitHub 的 Search API 只能按累计星数排，所以取回数据后要按 `st
 >
 > <img src="docs/images/04-chat.png" alt="AI 讲解对话" width="520">
 
-### 5. 收藏与资料库
+### 5. 延伸：相似项目推荐
+
+`GET /discover/cards/{id}/similar?limit=5`
+
+阅读抽屉底部的折叠条，按**当前卡片的入库向量**在知识库里查近邻。它回答的是「看完这个，接着该看什么」——榜单和搜索都是「主动找」，这一条是「顺路带你去下一个」。
+
+实现上和首页个性化排序刻意用了两套机制：
+
+| 决策 | 原因 |
+|---|---|
+| 走 Qdrant 原生 HNSW 检索，不用候选池 | 候选池是给首页排序用的固定 500 条快照，库里超出部分**永远召回不到**；相似推荐要的是「全库最像的几条」 |
+| 阈值下推给 Qdrant（`score_threshold`） | 捞满再在客户端丢，最终很可能只剩两三条，且浪费了召回名额 |
+| 同类型召回（仓库只找仓库） | 文章混进来对「接着看哪个项目」没有帮助 |
+| 无结果就整块隐藏，不凑数 | 推荐里混进不相关项目比留白更伤信任——点进去发现无关，就再也不会点第二次 |
+
+阈值不是拍脑袋定的：拿库里 32 张真实卡片重新 embedding 后统计了 496 个配对——**同方向**配对中位数 0.31 / p90 0.47，**跨方向**中位数 0.22 / p99 0.49。取 0.50 意味着过滤掉 99% 的跨方向配对。同时排序层对「共享技术概念」和「同方向」有极小的加分（各 0.02 / 0.03，封顶 0.08），只调整本来就接近的几条的先后，无法把差得远的顶上来。
+
+理由文案讲的是**两者的关系**而不是候选自己的属性：共享概念优先（且会自动剔除「Python」这类实现语言——库里几乎每个 Python 项目都共享它，写进理由只会显得是凑的），其次「同为 X 方向」，最后才是「与当前项目语义相近」。
+
+点任意一条会直接在**同一个抽屉里换上那张卡片**（重置会话、加载它的原文），可以 A → B → C 一路看下去，不必关掉抽屉回首页重新找。
+
+> 📸 相似项目 —— 抽屉底部折叠条，展开后给出理由与余弦相似度
+>
+> <img src="docs/images/10-similar.png" alt="相似项目推荐" width="880">
+
+### 6. 收藏与资料库
 
 `/me/bookmarks` 增删查、`/me/sessions` 学习历史、`/me/activities` 行为记录、`/me/export` 全量数据导出（JSON）。`user_id` 一律取自 access token 的 `sub`，请求体里的 user_id 不被信任。
 
-### 6. 成本账本（运营视角）
+### 7. 成本账本（运营视角）
 
 LLM 调用最容易被「先做功能、后发现账单」坑掉，所以每次调用都记账：
 
@@ -264,7 +290,7 @@ LLM 调用最容易被「先做功能、后发现账单」坑掉，所以每次�
 
 前端 `/admin` 的成本面板把「今天花了多少 / 照这个趋势月底多少 / 预算还能撑几天」讲清；预算充足时不说「还能撑 74997 天」这种荒谬文案，而是直接给「预算不构成约束」。
 
-### 7. 账号与安全
+### 8. 账号与安全
 
 | 机制 | 实现 |
 |---|---|
@@ -278,7 +304,7 @@ LLM 调用最容易被「先做功能、后发现账单」坑掉，所以每次�
 
 改密 / 注销 / 手动下线后会话写入 Redis 黑名单，access token 立即失效。账号注销有 15 天冷静期，期内可撤销。
 
-### 8. 学习闭环（后端实验性）
+### 9. 学习闭环（后端实验性）
 
 状态机 `IDLE → PUSHED → LEARNING → QUIZ → FSRS_UPDATE → COMPLETED`，接口齐全：
 
@@ -315,11 +341,11 @@ POST /learning/complete  归档 → 计算下次复习间隔
 
 ## API 一览
 
-共 49 个端点，全部带 `response_model`，错误统一为 `{code, message, detail}`。
+共 50 个端点，全部带 `response_model`，错误统一为 `{code, message, detail}`。
 
 | 分组 | 端点 |
 |---|---|
-| `/api/v1/discover` | `GET news` `GET articles` `POST refresh` `POST refresh-articles` `GET tasks/{id}` `GET rankings` `GET search` `GET trending` `GET by-tag/{tag}` `GET cards/{id}/content` `GET cards/{id}/provenance` `GET cards/{id}/digest` |
+| `/api/v1/discover` | `GET news` `GET articles` `POST refresh` `POST refresh-articles` `GET tasks/{id}` `GET rankings` `GET search` `GET trending` `GET by-tag/{tag}` `GET cards/{id}/content` `GET cards/{id}/provenance` `GET cards/{id}/digest` `GET cards/{id}/similar` |
 | `/api/v1/auth` | `POST register` `POST login` `POST refresh` `POST logout` `GET captcha` `POST password/forgot` `POST password/reset` `POST password/change` `POST account/delete` `POST account/delete/cancel` `GET sessions` `DELETE sessions/{id}` `DELETE sessions` `POST email/confirm` `POST email/resend` `GET me` |
 | `/api/v1/me` | `GET profile` `GET bookmarks` `POST bookmarks/{id}` `DELETE bookmarks/{id}` `GET sessions` `GET sessions/{id}` `GET activities` `GET export` |
 | `/api/v1/admin` | `GET features` `PATCH features/{key}` `GET users` `PATCH users/{id}/role` `GET whoami` `GET llm/usage` |
@@ -505,7 +531,6 @@ PostgreSQL 必需（账号、收藏、会话、成本台账）。Redis 缺失时
 
 **近期**
 - [ ] 前端补齐「测验 → FSRS 复习计划」界面，打通学习闭环
-- [ ] 相似仓库推荐：用当前卡片向量查近邻，在解读区下方展示「看了这个还该看什么」
 - [ ] 修正 Dockerfile，让 `docker compose up -d` 能起整套（含 PostgreSQL 与自动迁移）
 
 **中期**

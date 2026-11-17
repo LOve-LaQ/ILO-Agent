@@ -1,5 +1,9 @@
 import { api } from './client';
-import type { CardContentResponse, CardDigestResponse } from '../types/card';
+import type {
+  CardContentResponse,
+  CardDigestResponse,
+  SimilarResponse,
+} from '../types/card';
 
 /**
  * 卡片原文（仓库 README）快照 —— 「先读原文」页的数据来源。
@@ -32,4 +36,24 @@ export function fetchCardContent(cardId: string): Promise<CardContentResponse> {
  */
 export function fetchCardDigest(cardId: string): Promise<CardDigestResponse> {
   return api.get<CardDigestResponse>(`/discover/cards/${encodeURIComponent(cardId)}/digest`);
+}
+
+/**
+ * 相似项目（向量近邻）—— 「看完这个，接着该看什么」。
+ *
+ * 后端始终返回 200，用 `based_on` 表达可用性：
+ * - based_on='vector'       正常召回（items 可能为空：语义上没有足够相近的项目）
+ * - based_on='unavailable'  源卡片没有入库向量 / 向量库不可用 → 整块不显示
+ *
+ * 【为什么前端要把空列表也当正常态】相似推荐是「顺带看一眼」的增强，
+ * 不是主链路。它拿不到结果时最差的行为是「这块什么都没有」，
+ * 绝不该让整个阅读抽屉报错。
+ */
+export function fetchSimilarCards(
+  cardId: string,
+  limit: number = 5,
+): Promise<SimilarResponse> {
+  return api.get<SimilarResponse>(
+    `/discover/cards/${encodeURIComponent(cardId)}/similar?limit=${limit}`,
+  );
 }

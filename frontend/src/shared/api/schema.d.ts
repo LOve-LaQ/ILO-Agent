@@ -329,6 +329,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/discover/cards/{card_id}/similar": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Similar Cards
+         * @description 「看了这个，接着该看什么」—— 按向量近邻召回相近的项目
+         *
+         *     **匿名可读**：和榜单、搜索一样，这是发现链路上的一环，不该被登录墙拦住
+         *     （问答才需要登录）。它也几乎零成本：一次 Qdrant HNSW 检索，不调 LLM。
+         *
+         *     四个刻意的取舍：
+         *
+         *     1. **不用候选池，走 Qdrant 原生检索**。候选池是给首页排序用的固定 500 条
+         *        快照，超出部分永远召回不到；相似推荐要的是「全库里最像的几条」。
+         *     2. **宁可少给，不给凑数**。低于 `similar_min_score` 的一律不返回 —— 相似
+         *        推荐里混进不相关的项目，比一块空白更让人失望：用户点进去发现完全无关，
+         *        就再也不会信这个区块了。
+         *     3. **同类型召回**。仓库只找仓库：文章混进来对「接着看哪个项目」没有帮助。
+         *     4. **不可用时不是错误**。源卡片没入库（无向量）或 Qdrant 挂了，返回
+         *        `based_on=unavailable`，前端整块隐藏。相似推荐是增强，不该让抽屉报错。
+         */
+        get: operations["get_similar_cards_api_v1_discover_cards__card_id__similar_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/discover/cards/{card_id}/digest": {
         parameters: {
             query?: never;
@@ -3085,6 +3119,99 @@ export interface components {
             message: string;
         };
         /**
+         * SimilarItem
+         * @description 相似条目的展示字段
+         *
+         *     `similarity` 是**原始余弦相似度**，不是排序分：排序时对「共享概念 / 同方向」
+         *     有极小加分，但那个分数只用于决定先后，对外展示仍以语义相似度为准。
+         */
+        SimilarItem: {
+            /**
+             * Card Id
+             * @description 知识库卡片 id，前端据此续接「学习」抽屉
+             */
+            card_id: string;
+            /** Title */
+            title: string;
+            /** Url */
+            url?: string | null;
+            /**
+             * Summary Cn
+             * @description 中文摘要（入库时生成，可直接展示）
+             */
+            summary_cn?: string | null;
+            /** Language */
+            language?: string | null;
+            /** Stars */
+            stars?: number | null;
+            /**
+             * Type
+             * @default repo
+             * @enum {string}
+             */
+            type: "repo" | "article";
+            /**
+             * Category
+             * @description 方向代码，用于展示与技术归类
+             * @default other
+             */
+            category: string;
+            /**
+             * Core Concepts
+             * @description 完整技术概念（不是交集）：续接学习会话时要传给模型
+             */
+            core_concepts?: string[];
+            /**
+             * Similarity
+             * @description 余弦相似度（保留三位小数）
+             */
+            similarity: number;
+            /**
+             * Reason
+             * @description 一句中文理由：共享哪些概念 / 同属哪个方向
+             */
+            reason: string;
+            /**
+             * Shared Concepts
+             * @description 与源卡片共享的技术概念（最多 4 个）
+             */
+            shared_concepts?: string[];
+        };
+        /**
+         * SimilarResponse
+         * @description GET /discover/cards/{card_id}/similar 响应
+         *
+         *     - `based_on=vector`：正常，按向量近邻召回（items 可能为空 —— 语义上确实没有
+         *       足够相近的项目，此时**不该**拿不相关的结果凑数）
+         *     - `based_on=unavailable`：源卡片没有入库向量或 Qdrant 不可用，`reason` 说明原因，
+         *       前端整块隐藏（不是报错：相似推荐是增强，不是主链路）
+         */
+        SimilarResponse: {
+            /** Card Id */
+            card_id: string;
+            /**
+             * Based On
+             * @default vector
+             * @enum {string}
+             */
+            based_on: "vector" | "unavailable";
+            /**
+             * Reason
+             * @description based_on=unavailable 时的原因：no_vector | unavailable
+             */
+            reason?: string | null;
+            /**
+             * Min Score
+             * @description 本次采用的相似度下限，便于解释「为什么只有两条」
+             */
+            min_score: number;
+            /**
+             * Items
+             * @default []
+             */
+            items: components["schemas"]["SimilarItem"][];
+        };
+        /**
          * SimpleMessageResponse
          * @description 通用「操作已完成」响应（找回/重置/改密/注销等）
          */
@@ -4436,6 +4563,112 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CardContentResponse"];
+                };
+            };
+            /** @description 业务错误（{code, message, detail}） */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 未登录 / 凭证无效或已过期 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 已登录但无权访问 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 状态冲突 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 请求过于频繁（限流，响应头带 Retry-After） */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 服务内部错误 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 上游依赖失败 */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_similar_cards_api_v1_discover_cards__card_id__similar_get: {
+        parameters: {
+            query?: {
+                /** @description 返回条数（默认 5，最多 12） */
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                card_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SimilarResponse"];
                 };
             };
             /** @description 业务错误（{code, message, detail}） */

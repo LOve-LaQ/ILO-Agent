@@ -65,5 +65,11 @@ export type CardDigestResponse = components['schemas']['CardDigestResponse'];
 /** POST /discover/refresh 与 POST /discover/refresh-articles 的响应（异步受理，202） */
 export type TaskAcceptedResponse = components['schemas']['TaskAcceptedResponse'];
 
+/** GET /discover/cards/{card_id}/similar 的响应：按向量近邻召回的相似项目 */
+export type SimilarResponse = components['schemas']['SimilarResponse'];
+
+/** 相似推荐的一条（带上理由文案与共享概念） */
+export type SimilarItem = components['schemas']['SimilarItem'];
+
 /** GET /discover/tasks/{task_id} 的响应：采集任务的真实进度 */
 export type TaskProgressResponse = components['schemas']['TaskProgressResponse'];

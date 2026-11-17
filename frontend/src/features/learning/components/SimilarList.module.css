@@ -1,0 +1,163 @@
+/* 相似项目折叠条：占据抽屉底部一行，展开后内部滚动，不挤压正文 */
+
+.wrap {
+  border-top: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.toggle {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 11px 16px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.15s;
+}
+
+.toggle:hover {
+  background: var(--chip-bg);
+}
+
+.toggleOpen {
+  border-bottom: 1px solid var(--border);
+}
+
+.toggleLabel {
+  font-weight: 600;
+}
+
+.toggleCount {
+  font-size: 12px;
+  color: var(--text-soft, #6b7280);
+}
+
+.chevron {
+  margin-left: auto;
+  color: var(--text-soft, #6b7280);
+  font-size: 11px;
+}
+
+.list {
+  /* 展开后最多占抽屉一半：再高就把正文挤没了，而正文才是这一屏的主角 */
+  max-height: 48vh;
+  overflow-y: auto;
+  padding: 8px 10px 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.row {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 9px 10px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg);
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.15s, transform 0.15s;
+}
+
+.row:hover {
+  border-color: var(--brand);
+  transform: translateY(-1px);
+}
+
+.rowTop {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+
+.name {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  font-weight: 600;
+  /* 仓库名常带 owner/，超长时截断而不是把星数挤到下一行 */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.stars {
+  flex: none;
+  font-size: 11.5px;
+  color: var(--text-soft, #6b7280);
+  font-family: var(--mono);
+}
+
+.summary {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--text-soft, #4b5563);
+  /* 摘要最多两行：列表是用来扫的，不是用来读的 */
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.reasonRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 2px;
+}
+
+.reason {
+  font-size: 11.5px;
+  color: var(--brand-strong);
+  background: var(--chip-bg);
+  border-radius: 999px;
+  padding: 1px 8px;
+  /* 理由一行放不下时省略，不换行破坏卡片高度节奏 */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.score {
+  flex: none;
+  font-size: 11px;
+  color: var(--text-soft, #9ca3af);
+  font-family: var(--mono);
+}
+
+.foot {
+  margin: 2px 4px 4px;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--text-soft, #9ca3af);
+}
+
+.skeleton {
+  height: 58px;
+  border-radius: 10px;
+  background: linear-gradient(90deg, var(--chip-bg) 25%, var(--border) 37%, var(--chip-bg) 63%);
+  background-size: 400% 100%;
+  animation: shimmer 1.4s ease infinite;
+}
+
+@keyframes shimmer {
+  0% {
+    background-position: 100% 50%;
+  }
+  100% {
+    background-position: 0 50%;
+  }
+}

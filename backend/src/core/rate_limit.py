@@ -50,6 +50,8 @@ _RULES: dict[str, tuple[str, int]] = {
     # 搜索：缓存键由用户输入决定（不像榜单只有 24 个），是唯一能被「换个词就穿透」
     # 的端点，因此配额要更紧 —— 否则把它当免费 GitHub 代理用，配额几分钟就没了
     "discover:search:ip": ("search_rate_limit_per_hour", 3600),
+    # 相似推荐：纯读 Qdrant，但 card_id 可枚举，不给配额就是免费的向量库爬取入口
+    "discover:similar:ip": ("similar_rate_limit_per_hour", 3600),
     "password:reset:ip": ("password_reset_rate_limit_per_hour", 3600),
     "learning:chat:ip": ("learning_chat_rate_limit_per_hour", 3600),
     "account:cancel:ip": ("account_cancel_rate_limit_per_hour", 3600),
@@ -157,6 +159,7 @@ CARD_DIGEST_IP = RateLimitRule("discover:digest:ip")
 NEWS_IP = RateLimitRule("discover:news:ip")
 RANKING_IP = RateLimitRule("discover:ranking:ip")
 SEARCH_IP = RateLimitRule("discover:search:ip")
+SIMILAR_IP = RateLimitRule("discover:similar:ip")
 PASSWORD_RESET_IP = RateLimitRule("password:reset:ip")
 LEARNING_CHAT_IP = RateLimitRule("learning:chat:ip")
 ACCOUNT_CANCEL_IP = RateLimitRule("account:cancel:ip")
@@ -180,6 +183,7 @@ __all__ = [
     "REGISTER_IP",
     "REFRESH_IP",
     "SEARCH_IP",
+    "SIMILAR_IP",
     "RateLimitRule",
     "enforce",
     "hit",

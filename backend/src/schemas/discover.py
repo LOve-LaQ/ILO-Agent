@@ -5,6 +5,7 @@
 - TaskProgressResponse: GET /discover/tasks/{task_id} 的任务进度响应
 - ProvenanceResponse: GET /discover/cards/{card_id}/provenance 的内容溯源响应
 - CardContentResponse: GET /discover/cards/{card_id}/content 的原文快照响应
+- SimilarResponse: GET /discover/cards/{card_id}/similar 的相似推荐响应
 """
 
 from datetime import datetime
@@ -306,3 +307,51 @@ class CardDigestResponse(BaseModel):
     reason: Optional[str] = Field(
         None, description="origin=unavailable 时的原因，便于前端给出准确提示"
     )
+
+
+# ==================== 相似推荐（向量近邻） ====================
+
+
+class SimilarItem(BaseModel):
+    """相似条目的展示字段
+
+    `similarity` 是**原始余弦相似度**，不是排序分：排序时对「共享概念 / 同方向」
+    有极小加分，但那个分数只用于决定先后，对外展示仍以语义相似度为准。
+    """
+
+    card_id: str = Field(..., description="知识库卡片 id，前端据此续接「学习」抽屉")
+    title: str
+    url: Optional[str] = None
+    summary_cn: Optional[str] = Field(None, description="中文摘要（入库时生成，可直接展示）")
+    language: Optional[str] = None
+    stars: Optional[int] = None
+    type: Literal["repo", "article"] = "repo"
+    category: str = Field("other", description="方向代码，用于展示与技术归类")
+    core_concepts: List[str] = Field(
+        default_factory=list,
+        description="完整技术概念（不是交集）：续接学习会话时要传给模型",
+    )
+    similarity: float = Field(..., ge=0, le=1, description="余弦相似度（保留三位小数）")
+    reason: str = Field(..., description="一句中文理由：共享哪些概念 / 同属哪个方向")
+    shared_concepts: List[str] = Field(
+        default_factory=list, description="与源卡片共享的技术概念（最多 4 个）"
+    )
+
+
+class SimilarResponse(BaseModel):
+    """GET /discover/cards/{card_id}/similar 响应
+
+    - `based_on=vector`：正常，按向量近邻召回（items 可能为空 —— 语义上确实没有
+      足够相近的项目，此时**不该**拿不相关的结果凑数）
+    - `based_on=unavailable`：源卡片没有入库向量或 Qdrant 不可用，`reason` 说明原因，
+      前端整块隐藏（不是报错：相似推荐是增强，不是主链路）
+    """
+
+    card_id: str
+    based_on: Literal["vector", "unavailable"] = "vector"
+    reason: Optional[str] = Field(
+        None, description="based_on=unavailable 时的原因：no_vector | unavailable"
+    )
+    min_score: float = Field(..., description="本次采用的相似度下限，便于解释「为什么只有两条」")
+    items: List[SimilarItem] = []
+

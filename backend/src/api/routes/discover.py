@@ -33,6 +33,7 @@ from src.core.rate_limit import (
     NEWS_IP,
     RANKING_IP,
     SEARCH_IP,
+    SIMILAR_IP,
     rate_limit,
 )
 from src.core.redis_client import get_redis as get_shared_redis
@@ -43,6 +44,7 @@ from src.schemas.discover import (
     ProvenanceResponse,
     RankingResponse,
     SearchResponse,
+    SimilarResponse,
     TaggedNewsResponse,
     TaskAcceptedResponse,
     TaskProgressResponse,
@@ -1328,6 +1330,76 @@ async def get_card_content(card_id: str) -> Dict[str, Any]:
     from src.services.collection_service import get_or_fetch_card_content
 
     return await get_or_fetch_card_content(card_id)
+
+
+@router.get(
+    "/cards/{card_id}/similar",
+    response_model=SimilarResponse,
+    dependencies=[Depends(rate_limit(SIMILAR_IP))],
+)
+async def get_similar_cards(
+    card_id: str,
+    limit: int = Query(5, ge=1, le=12, description="返回条数（默认 5，最多 12）"),
+) -> Dict[str, Any]:
+    """「看了这个，接着该看什么」—— 按向量近邻召回相近的项目
+
+    **匿名可读**：和榜单、搜索一样，这是发现链路上的一环，不该被登录墙拦住
+    （问答才需要登录）。它也几乎零成本：一次 Qdrant HNSW 检索，不调 LLM。
+
+    四个刻意的取舍：
+
+    1. **不用候选池，走 Qdrant 原生检索**。候选池是给首页排序用的固定 500 条
+       快照，超出部分永远召回不到；相似推荐要的是「全库里最像的几条」。
+    2. **宁可少给，不给凑数**。低于 `similar_min_score` 的一律不返回 —— 相似
+       推荐里混进不相关的项目，比一块空白更让人失望：用户点进去发现完全无关，
+       就再也不会信这个区块了。
+    3. **同类型召回**。仓库只找仓库：文章混进来对「接着看哪个项目」没有帮助。
+    4. **不可用时不是错误**。源卡片没入库（无向量）或 Qdrant 挂了，返回
+       `based_on=unavailable`，前端整块隐藏。相似推荐是增强，不该让抽屉报错。
+    """
+    from src.modules.discovery.tech_knowledge import get_knowledge_base
+    from src.services.similar import build_similar_items
+
+    kb = await asyncio.to_thread(get_knowledge_base)
+    # 先取源卡片：既是「有没有向量」的前置判断，也提供算共享概念所需的 payload。
+    # get_by_id 同样是同步网络调用，必须卸载到线程池，否则会卡住事件循环
+    source = await asyncio.to_thread(kb.get_by_id, card_id)
+    min_score = settings.similar_min_score
+
+    item_type = (source or {}).get("type")
+    if not item_type:
+        # 卡片不在知识库里 = 没有入库向量。此时不能猜一个类型去做全文检索：
+        # 拿标题当 query 重新 embed 会与库内向量不同源，结果不可信
+        return {
+            "card_id": card_id,
+            "based_on": "unavailable",
+            "reason": "no_vector",
+            "min_score": min_score,
+            "items": [],
+        }
+
+    # 多召回一些再装点：阈值与「概念微调」都会淘汰一部分，恰好取 limit 条
+    # 会让最终结果偏少（阈值剔除后就没有替补了）
+    recall = max(limit * settings.similar_recall_multiplier, limit + 4)
+    result = await asyncio.to_thread(
+        kb.similar_items, card_id, item_type, recall, min_score
+    )
+
+    if result.get("reason"):
+        return {
+            "card_id": card_id,
+            "based_on": "unavailable",
+            "reason": result["reason"],
+            "min_score": min_score,
+            "items": [],
+        }
+
+    return {
+        "card_id": card_id,
+        "based_on": "vector",
+        "min_score": min_score,
+        "items": build_similar_items(source, result.get("items") or [], limit=limit),
+    }
 
 
 @router.get(

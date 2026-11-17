@@ -118,6 +118,23 @@ class Settings(BaseSettings):
     search_rate_limit_per_hour: int = 120
     search_cache_ttl_seconds: int = 900
     search_stale_ttl_seconds: int = 3600
+
+    # 相似仓库（/discover/cards/{id}/similar）
+    # 纯读 Qdrant（一次 HNSW 检索，毫秒级），但 card_id 是路径参数、可任意枚举，
+    # 不限流就等于提供一个「把全库向量挨个查一遍」的免费爬口。
+    similar_rate_limit_per_hour: int = 600
+    # 相似度下限：余弦低于这个值的结果和源卡片基本无关，宁可整块不显示。
+    #
+    # 这个值不是拍脑袋定的，是拿库里 32 张真实卡片（8 个方向 × 4）重新 embedding
+    # 后实测出来的（text-embedding-v3，1536 维，共 496 个配对）：
+    #   同方向配对：中位数 0.31，p90 0.47，p99 0.76
+    #   跨方向配对：中位数 0.22，p90 0.36，p99 0.49
+    # 取 0.50 意味着**过滤掉 99% 的跨方向配对**，同时放行真正同语义的那一小撮。
+    # （原本想取 0.45，但实测跨方向 p99 就有 0.49，那等于让噪声全进。）
+    similar_min_score: float = 0.50
+    # 召回后参与的候选数：多取一些再按阈值与共享概念重排，避免刚好取满 limit
+    # 却混进一堆跨方向的条目
+    similar_recall_multiplier: int = 4
     # 撤销注销（/auth/account/delete/cancel）：未登录可调且要校验密码，
     # 不设防就会变成绕开登录锁定的口令爆破旁路
     account_cancel_rate_limit_per_hour: int = 10

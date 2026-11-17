@@ -5,6 +5,7 @@ import { MarkdownBody } from '../../../components/ui/MarkdownBody';
 import { useLearningSession } from '../hooks/useLearningSession';
 import { ChatBubble, TypingBubble } from './ChatBubble';
 import styles from './LearningDrawer.module.css';
+import { SimilarList } from './SimilarList';
 
 /**
  * 学习会话抽屉：四态 reading（先读原文）/ loading（建会话）/ explanation（卡片要点）
@@ -41,6 +42,7 @@ export function LearningDrawer() {
     pending,
     question,
     setQuestion,
+    startLearning,
     startChatting,
     loadDigest,
     showCardPoints,
@@ -225,6 +227,20 @@ export function LearningDrawer() {
                 {sessionId ? '💬 继续提问' : '💬 直接提问'}
               </button>
             </div>
+
+            {/*
+              「看完这篇接着看什么」：折叠在抽屉底部，不挤占正文高度。
+              只在阅读态出现 —— 问答态的用户正在就当前项目提问，此时塞推荐
+              会把它变成又一个分心入口。`card` 为 null（服务端恢复的会话）
+              时没有 id 可查，整块不渲染。
+            */}
+            {card ? (
+              <SimilarList
+                cardId={card.id}
+                active={state === 'reading'}
+                onPick={(next) => void startLearning(next)}
+              />
+            ) : null}
           </div>
         )}
 
