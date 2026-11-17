@@ -455,14 +455,14 @@ ilo-agent-demo/
 
 ```bash
 cd backend
-python -m pytest                             # 614 项通过（另有 2 项 eval 质量门禁默认 deselect）
+python -m pytest                             # 615 项通过（另有 2 项 eval 质量门禁默认 deselect）
 python -m pytest tests/test_search.py -v     # 单模块
 python -m pytest -m eval                     # 只跑 eval 门禁（会真实调用 LLM，花钱）
 ```
 
 `pytest.ini` 里的 `addopts = -m "not eval"` 把 `evals/` 的 LLM-as-judge 评测挡在默认回归之外——它是质量门禁，不是单元测试，不该每次跑测试都产生账单。
 
-614 是本机 PostgreSQL 已起、Redis / Qdrant 已起时的数字；走真实库的几个文件（`test_auth.py`、`test_authz.py`、`test_admin_flags.py` 等）在 `DATABASE_URL` 不可用时整文件 `skipif`，数量会相应变少。
+615 是本机 PostgreSQL 已起、Redis / Qdrant 已起时的数字；走真实库的几个文件（`test_auth.py`、`test_authz.py`、`test_admin_flags.py` 等）在 `DATABASE_URL` 不可用时整文件 `skipif`，数量会相应变少。
 
 37 个测试文件按关注点划分，不是按文件划分：
 
@@ -538,6 +538,8 @@ docker compose up -d --build
 
 `docker/entrypoint.sh` 会先等 PostgreSQL 可连，跑 `alembic upgrade head`，再 `exec uvicorn`——不用手动建表。容器网络里 `TRUSTED_PROXY_IPS` 放行了 Docker 网桥网段（`172.16.0.0/12`），保证隧道注入的 XFF 仍用于限流分桶。
 
+版本对齐：qdrant 钉 `v1.19.1`，与 `qdrant-client` 1.20 及数据段格式一致——早期写死的 `v1.15.4` 读不了 v1.19 写的 `InRamMmap` 段，启动直接 panic。Redis 只存 1h TTL 的会话缓存，若从旧卷（Redis 8 的 RDB v15）升级到 `redis:7-alpine` 报 `Can't handle RDB format version 15`，删掉 `redis_data` 卷重建即可，无持久数据可丢。
+
 ⚠️ 生产上线前必须改三处：compose 里的 `POSTGRES_PASSWORD` 与 `DATABASE_URL` 口令（当前是开发默认值）、`JWT_SECRET`（至少 32 字节）、`COOKIE_SECURE=true`（HTTPS）。此外 compose 用 `env_file` 可选加载 `backend/.env` 带入真实 Key，文件不存在也能以降级模式启动。
 
 > 构建环境提示：若 Docker daemon 配了失效的代理，`docker compose build` 会在拉基础镜像阶段失败（报 `app settings HTTPS proxy ... refused`）。此时需要在 Docker Desktop 设置里修正代理或配置国内镜像源——这是本机环境问题，与镜像本身无关。
@@ -567,8 +569,8 @@ PostgreSQL 必需（账号、收藏、会话、成本台账）。Redis 缺失时
 
 **近期**
 - [ ] 前端补齐「测验 → FSRS 复习计划」界面，打通学习闭环
-- [x] 前端分包：按依赖边界切成 vendor/router/state/markdown/entry 五块，最大块 346 KB，消除 500 KB 警告（见 `docs/bundle/COMPARISON.md`）
-- [ ] 首屏按需加载：markdown 块（gzip 96 KB）目前仍被 `modulepreload` 预取，改成动态 import 后首屏可再省这块——但抽屉在首页常驻，需一并改挂载方式
+- [x] 前端分包：按依赖边界切成 vendor/router/state/markdown/entry 五块，最大块 286 KB，消除 500 KB 警告
+- [x] 首屏按需加载：MarkdownBody 改门面 + `React.lazy`，markdown 退出 modulepreload，首屏 244 → 150 KB gzip（-39%）；抽屉保持常驻以保留刷新恢复会话。数据对比与踩坑见 `docs/bundle/COMPARISON.md`
 
 **中期**
 - [ ] 检索质量评测纳入 CI：`evals/` 已有数据集与判分脚本，缺自动门禁

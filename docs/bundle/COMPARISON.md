@@ -2,13 +2,20 @@
 
 > 目的：把「为什么这么切、切完效果如何、踩过什么坑」固化下来。
 > 数据由 `npm run bundle:report -- --save <name>` 生成，快照在本目录：
-> `baseline.json`（分包前）/ `after-split.json`（分包后）。任何人可重跑复现。
+> `baseline.json`（单块）/ `after-split.json`（分包）/ `after-lazy.json`（按需加载）。
+> 任何人可重跑复现。
 
-## 一句话结论
+## 两阶段结论
 
-单个 775 KB 的巨型 chunk 被切成 5 块，**最大块从 775 KB 降到 346 KB**，消除了 Vite 的 500 KB 警告；
-**总 gzip 体积几乎不变**（242.7 → 243.7 KB）——分包的收益是**缓存复用与并行下载**，
-不是字节减少。要真正减小首屏下载量，需要按需加载（见文末下一步）。
+| 阶段 | 最大块 | 首屏 gzip | 关键收益 |
+|---|---|---|---|
+| 分包前 baseline | 774.7 KB | 242.7 KB | —（单块，有 500 KB 警告）|
+| 阶段一 after-split | 345.7 KB | 243.7 KB | 消除警告 + 缓存复用；**首屏字节没变** |
+| 阶段二 after-lazy | 286.3 KB | **149.5 KB** | markdown 退出 modulepreload，首屏省 94 KB（-39%） |
+
+**阶段二才是真正的首屏瘦身**：把 `MarkdownBody` 拆成门面 + `React.lazy` 动态实现，
+react-markdown 全家桶只在用户真正打开学习抽屉/回看记录时才下载。
+阶段一单独看不要误称为「首屏优化」——它的价值是缓存复用。
 
 ## 数据对比
 
@@ -73,22 +80,42 @@ SPA 客户端导航命中内存缓存时 `resource.transferSize === 0`，快速�
 报 `net::ERR_ABORTED`——两者都不是加载失败。验证判据只认三类真实故障：
 console 异常、根容器无子节点、页面文本为空。
 
+### 4. `manualChunks` 抢不回 react，改用 `codeSplitting` + priority
+
+阶段一只把 markdown 拆出来，但它仍被 modulepreload。根因不是 lazy 没生效，
+而是**整个 react 被塞进了 markdown chunk**：`manualChunks` 只给归属建议，
+Rolldown 把被多组引用的共享模块归到「最先引用它的组」——react-markdown 依赖 react，
+于是 react 跟着进了 markdown，导致 router/state/vendor 全都静态依赖 markdown。
+
+改成 Rolldown 的 `output.codeSplitting.groups`，用 `priority` 显式排序：
+react 组 priority 3、router/state 2、markdown 1。高优先级组能把模块从低优先级组抢回来。
+结果 react 回到 vendor，markdown 变成纯叶子（只依赖 runtime），preload 列表里 markdown 消失。
+
+## 阶段二：首屏按需加载（已完成）
+
+1. `MarkdownBody.tsx` 变成**纯门面**：只有 `React.lazy(() => import('./MarkdownBodyImpl'))`
+   + `Suspense`，不含任何 markdown 依赖；
+2. `MarkdownBodyImpl.tsx` 保留原样渲染逻辑与 XSS 白名单（实现一行未改，只是搬家）；
+3. **抽屉保持常驻**：首页 `LearningDrawer` 无条件挂载不能砍——刷新后要靠它的 `restore()`
+   恢复上次会话。但 closed 态 `return null`，不会渲染到 MarkdownBody，所以首屏不触发动态加载；
+   「我的 → 学习记录详情」的 `SessionDetail` 同理，都是用户主动进入才渲染。
+
+**结果**：markdown（78.7 KB gzip）+ 实现块（16.1 KB gzip）退出首屏，首屏从 243.7 KB
+降到 **149.5 KB gzip**。
+
 ## 验证结果
 
-- `npm run build`：`tsc -b` 通过、467 模块、无体积警告、无 sourcemap 残留
+- `npm run build`：`tsc -b` 通过、无体积警告、无 sourcemap 残留
 - 浏览器（CDP 驱动 headless Chrome，1280×900）：`/`、`/login`、`/register`、
   `/legal/privacy`、404 路由全部 `root>0`、console 异常 0、真实网络失败 0
-- 产物由 FastAPI 同源托管（`SERVE_FRONTEND`），实测 8000 端口已返回新 chunk 文件名
+- 首屏网络实测：加载的 chunk 里无 markdown / MarkdownBodyImpl，`link[rel=modulepreload]`
+  也不含它们；在页面上下文 `import()` 两个动态块均成功（导出 `default` 组件与工具函数）
+- `npm run check:sanitize`：XSS 白名单守卫仍全绿
+- Docker 镜像实测：容器同源托管返回新 chunk（`index-TIYoIulu` + 4 块，无 markdown preload），
+  `/health` 三依赖全 ok
 
-## 下一步：真正减小首屏（未做）
+## 若继续优化
 
-当前 Vite 给 entry 的每个前置依赖都注入了 `modulepreload`，5 块在首屏全部预取，
-所以首屏总下载量仍是 ~244 KB gzip。要再降，需要让 markdown 块（96 KB）按需加载：
-
-1. `MarkdownBody` 改为 `React.lazy(() => import(...))`；
-2. 首页 `DiscoveryPage` 无条件挂载的 `LearningDrawer` 改为条件挂载
-   （用户点「开始讲解」时才挂），否则 lazy 也会被首屏触发；
-3. 「我的 → 学习记录详情」的 `SessionDetail` 同样处理。
-
-这一步改动面较大（涉及抽屉挂载时机与恢复逻辑），且 qdrant 当前不可用无法完整端到端验证
-学习链路，所以留到后续单独做。分包本身已是可独立交付、可回溯的一版。
+抽屉常驻是为了刷新恢复会话，这是产品功能，不要为了省几十 KB 砍掉它。
+真要进一步减首屏，可考虑把 `restore()` 提升到 feature hook 层、抽屉改为纯受控组件，
+但收益（每次少挂载一个空组件）远小于复杂度，不推荐。

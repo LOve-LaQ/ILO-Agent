@@ -1,0 +1,99 @@
+{
+  "generatedAt": "2026-11-17T10:21:51.146Z",
+  "total": {
+    "raw": 856351,
+    "gzip": 250190
+  },
+  "byKind": {
+    "markdown": {
+      "raw": 286287,
+      "gzip": 80591,
+      "files": 1
+    },
+    "vendor": {
+      "raw": 189595,
+      "gzip": 58834,
+      "files": 1
+    },
+    "entry": {
+      "raw": 135339,
+      "gzip": 40841,
+      "files": 1
+    },
+    "router": {
+      "raw": 93146,
+      "gzip": 30548,
+      "files": 1
+    },
+    "lazy": {
+      "raw": 52703,
+      "gzip": 16491,
+      "files": 1
+    },
+    "css": {
+      "raw": 63050,
+      "gzip": 12111,
+      "files": 1
+    },
+    "state": {
+      "raw": 35515,
+      "gzip": 10346,
+      "files": 1
+    },
+    "runtime": {
+      "raw": 716,
+      "gzip": 428,
+      "files": 1
+    }
+  },
+  "files": [
+    {
+      "name": "markdown-BtEQFL5E.js",
+      "kind": "markdown",
+      "raw": 286287,
+      "gzip": 80591
+    },
+    {
+      "name": "vendor-71hFbhjY.js",
+      "kind": "vendor",
+      "raw": 189595,
+      "gzip": 58834
+    },
+    {
+      "name": "index-TIYoIulu.js",
+      "kind": "entry",
+      "raw": 135339,
+      "gzip": 40841
+    },
+    {
+      "name": "router-DR5px4gL.js",
+      "kind": "router",
+      "raw": 93146,
+      "gzip": 30548
+    },
+    {
+      "name": "MarkdownBodyImpl-C0FHalVE.js",
+      "kind": "lazy",
+      "raw": 52703,
+      "gzip": 16491
+    },
+    {
+      "name": "index-V_9M-6mU.css",
+      "kind": "css",
+      "raw": 63050,
+      "gzip": 12111
+    },
+    {
+      "name": "state-CzghOWf8.js",
+      "kind": "state",
+      "raw": 35515,
+      "gzip": 10346
+    },
+    {
+      "name": "rolldown-runtime-hePW80VL.js",
+      "kind": "runtime",
+      "raw": 716,
+      "gzip": 428
+    }
+  ]
+}

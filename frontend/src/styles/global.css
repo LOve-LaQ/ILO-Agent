@@ -240,3 +240,15 @@ button {
     padding: 9px;
   }
 }
+
+/* MarkdownBody 动态加载时的占位：一条淡色细线，加载完成后被正文替换。
+   用 inline-block + 固定高度，避免在气泡里撑开布局造成跳变。 */
+.md-loading {
+  display: inline-block;
+  width: 4rem;
+  height: 0.75rem;
+  border-radius: 3px;
+  background: var(--border, #e5e7eb);
+  opacity: 0.6;
+  vertical-align: middle;
+}
