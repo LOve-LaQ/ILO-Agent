@@ -18,6 +18,15 @@
   border-color: var(--border-strong);
 }
 
+/* 触屏上 hover 会“粘住”：点过的卡片一直保持抬升，像是被选中了。关掉 */
+@media (hover: none) {
+  .card:hover {
+    box-shadow: var(--shadow-card);
+    transform: none;
+    border-color: var(--border);
+  }
+}
+
 /* ============ 卡片头 ============ */
 .cardHead {
   display: flex;
@@ -188,4 +197,36 @@
   display: inline-flex;
   align-items: center;
   gap: 4px;
+}
+
+/* ============ 手机 ============ */
+@media (max-width: 640px) {
+  .card {
+    padding: 14px 14px 12px;
+    gap: 9px;
+  }
+
+  .repoName {
+    font-size: 13.5px;
+  }
+
+  /* 单列布局下不再需要和邻卡对齐，去掉固定高度；多给一行摘要 */
+  .oneLiner {
+    min-height: 0;
+    -webkit-line-clamp: 4;
+  }
+
+  .artTitle {
+    font-size: 15px;
+  }
+
+  /* 卡片脚里有「星数 / 语言 / 来源 / 开始学习」，窄屏允许换行，避免被裁 */
+  .cardFoot {
+    flex-wrap: wrap;
+    gap: 8px 10px;
+  }
+
+  .heat {
+    gap: 10px;
+  }
 }

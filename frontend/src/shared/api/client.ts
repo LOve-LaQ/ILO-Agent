@@ -171,6 +171,10 @@ export const api = {
   get: <T>(path: string, options?: RequestOptions) => request<T>(path, { ...options, method: 'GET' }),
   post: <T>(path: string, body?: unknown, options?: RequestOptions) =>
     request<T>(path, { ...options, method: 'POST', body }),
+  // PATCH：局部更新语义（如「只改一个开关的 enabled」）。用 PUT 会把「没传的字段」
+  // 隐含成「置空」，管理后台这种表单最容易踩这个坑。
+  patch: <T>(path: string, body?: unknown, options?: RequestOptions) =>
+    request<T>(path, { ...options, method: 'PATCH', body }),
   delete: <T>(path: string, options?: RequestOptions) =>
     request<T>(path, { ...options, method: 'DELETE' }),
 };

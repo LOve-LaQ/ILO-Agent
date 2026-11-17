@@ -13,7 +13,9 @@ from typing import Any, List, Optional
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, model_validator
 
+from src.core.config import settings
 from src.core.password_policy import check_password
+from src.core.roles import effective_role
 from src.core.security import MAX_PASSWORD_BYTES
 from src.core.username_policy import check_username
 
@@ -149,6 +151,10 @@ class UserPublic(BaseModel):
     # 邮箱是否已验证（阶段 5 确认邮件）。注册不做阻塞式校验，因此 false 是正常状态，
     # 仅用于向用户提示「收不到确认邮件 = 邮箱可能填错了」。
     email_verified: bool
+    # 角色（阶段 6）：前端据此决定是否显示「管理后台」入口。
+    # 【这只是展示层的便利】真正的鉴权在后端 require_admin，前端隐藏入口不等于
+    # 有权限边界 —— 任何人都可以直接请求 /admin/*，只是会拿到 403。
+    role: str = "user"
     created_at: datetime
 
     @classmethod
@@ -162,6 +168,7 @@ class UserPublic(BaseModel):
             username=user.username,
             is_active=user.is_active,
             email_verified=user.email_verified_at is not None,
+            role=effective_role(user, settings.admin_emails),
             created_at=user.created_at,
         )
 

@@ -106,6 +106,12 @@ _DB_CONSUMER_MODULES = (
     # 必须一并关掉（否则 /discover/news 的个性化分支会真的去连开发库）
     "src.services.interest_profile",
     "src.services.learning_service",
+    # 功能开关（阶段 6）：契约测试要验证「开关默认开启时业务照常」，
+    # 不能每次请求都去连开发库读 feature_flags 表
+    "src.services.feature_flags",
+    # LLM 成本账本（阶段 7）：契约测试不碰 LLM（已强制降级），但只要有调用就会记账；
+    # 关掉数据库写入，避免测试往开发库的 llm_usage 表里灌假数据，污染成本面板
+    "src.services.llm_usage",
 )
 _REAL_DB_TEST_MODULES = {
     "test_auth.py",
@@ -116,6 +122,9 @@ _REAL_DB_TEST_MODULES = {
     "test_account_deletion.py",
     "test_authz.py",
     "test_email_verification.py",
+    "test_admin_flags.py",
+    # 成本账本用例要真的往 llm_usage 写行并读回（见 test_llm_cost.py）
+    "test_llm_cost.py",
 }
 
 

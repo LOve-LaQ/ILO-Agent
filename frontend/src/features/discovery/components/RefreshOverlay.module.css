@@ -2,8 +2,10 @@
 .progressCard {
   background: var(--surface);
   border-radius: 16px;
-  padding: 26px 30px;
-  width: 300px;
+  padding: 26px 26px 22px;
+  width: 320px;
+  /* 320px 宽的小屏上留出两侧呼吸位 */
+  max-width: calc(100vw - 32px);
   text-align: center;
   box-shadow: var(--shadow-pop);
 }
@@ -14,7 +16,7 @@
   margin-bottom: 6px;
 }
 
-.progressCard p {
+.stage {
   font-size: 12.5px;
   color: var(--text-3);
 }
@@ -25,6 +27,7 @@
   border-radius: 99px;
   overflow: hidden;
   margin: 12px 0 8px;
+  position: relative;
 }
 
 .bar i {
@@ -33,5 +36,42 @@
   width: 0%;
   background: var(--brand);
   border-radius: 99px;
-  transition: width 0.6s ease;
+  transition: width 0.5s ease;
+}
+
+/* 总数未知时的「跑马灯」：进度条来回滑动，明确表达「在动、但还不知道还剩多少」。
+   这比停在 0% 诚实得多 —— 停在 0% 和"没开始"在视觉上无法区分。 */
+.indeterminate {
+  width: 40% !important;
+  animation: slide 1.2s ease-in-out infinite;
+}
+
+@keyframes slide {
+  0% {
+    transform: translateX(-110%);
+  }
+  100% {
+    transform: translateX(260%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .indeterminate {
+    animation: none;
+    width: 100% !important;
+    opacity: 0.35;
+  }
+}
+
+.meta {
+  font-size: 12px;
+  color: var(--text-2);
+  font-variant-numeric: tabular-nums;
+}
+
+.hint {
+  font-size: 11.5px;
+  color: var(--text-3);
+  margin-top: 8px;
+  line-height: 1.5;
 }

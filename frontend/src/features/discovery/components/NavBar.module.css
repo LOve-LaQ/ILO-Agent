@@ -21,6 +21,9 @@
   font-weight: 700;
   font-size: 15.5px;
   letter-spacing: 0.2px;
+  /* 品牌块不参与收缩：一旦被压到 min-content，就会变成「ILO 技术情报 / 官」竖排 */
+  flex: none;
+  white-space: nowrap;
 }
 
 .brandMark {
@@ -45,6 +48,7 @@
 /* ============ 分段切换（仓库 / 文章） ============ */
 .seg {
   display: flex;
+  flex: none;
   background: var(--chip-bg);
   border-radius: 10px;
   padding: 3px;
@@ -52,7 +56,7 @@
 }
 
 .seg button {
-  padding: 5px 16px;
+  padding: 5px 13px;
   border-radius: 8px;
   font-size: 13px;
   color: var(--text-2);
@@ -60,6 +64,7 @@
   align-items: center;
   gap: 6px;
   font-weight: 500;
+  white-space: nowrap;
 }
 
 .seg button.on {
@@ -82,11 +87,37 @@
   color: var(--brand);
 }
 
-.navRight {
+.navActions {
   margin-left: auto;
   display: flex;
   align-items: center;
   gap: 8px;
+  flex: none;
+}
+
+/* 账号区与操作区分开成两个容器，才能在窄屏把它们拆到不同的行里 */
+.navAccount {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-left: 8px;
+  border-left: 1px solid var(--border);
+  flex: none;
+  min-width: 0;
+}
+
+/* 操作区被隐藏时（榜单视图），由账号区接管「推到最右」的职责 ——
+   否则整组元素会紧贴分段切换，看起来像是漏了样式 */
+.navAccountPush {
+  margin-left: auto;
+  border-left: none;
+  padding-left: 0;
+}
+
+/* 账号区的文字按钮一律不换行：被压缩时宁可整体挤压，也不要「账号安 / 全」这种竖排 */
+.navAccount a,
+.navAccount button {
+  white-space: nowrap;
 }
 
 .dotSep {
@@ -95,11 +126,68 @@
   background: var(--border);
 }
 
-@media (max-width: 860px) {
+/* 副标题是装饰性文案：一旦顶栏开始紧（已登录的桌面端尤其明显），先砍它 */
+@media (max-width: 1128px) {
   .brandSub {
     display: none;
   }
+}
+
+@media (max-width: 860px) {
   .dotSep {
     display: none;
+  }
+}
+
+/* ============ 窄屏：顶栏拆两行 ============ */
+/* 原来「品牌 + 分段切换 + 操作 + 账号」挤在一行 60px 里，在 390px 宽度下每个元素
+   都被压到 min-content，于是「仓 库」「抓 取 最 新」逐字竖排、整页被撑出横向滚动。
+   这里改成两行网格：第一行品牌 + 账号（低频），第二行分段切换独占一行（高频）。
+
+   断点取 720 而不是 640：单行形态下这些元素实测需要约 590px，
+   加上容器内边距后，640–720 这段（竖屏小平板、横屏手机）会刚好卡在边上 */
+@media (max-width: 720px) {
+  .navInner {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas:
+      'brand account'
+      'seg seg';
+    height: auto;
+    padding: 10px 0;
+    gap: 10px 8px;
+  }
+
+  /* 换一批 / 抓取最新 在窄屏移到内容区标题行（Toolbar 里的 .actions），
+     否则会和分段切换抢同一行，把「仓库 1007」挤成两行 */
+  .navActions {
+    display: none;
+  }
+
+  .brand {
+    grid-area: brand;
+    min-width: 0;
+    font-size: 14.5px;
+    white-space: nowrap;
+    overflow: hidden;
+  }
+
+  .seg {
+    grid-area: seg;
+    width: 100%;
+  }
+
+  /* 两个 tab 平分整行，点击面积翻倍 */
+  .seg button {
+    flex: 1;
+    justify-content: center;
+    padding: 7px 8px;
+  }
+
+  .navAccount {
+    grid-area: account;
+    justify-self: end;
+    padding-left: 0;
+    border-left: none;
   }
 }

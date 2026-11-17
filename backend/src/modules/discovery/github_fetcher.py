@@ -12,7 +12,7 @@ import json
 import re
 import time
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 from urllib.parse import urlparse
 
 import httpx
@@ -40,7 +40,7 @@ MAX_README_CHARS = 60000
 README_FILENAMES = ("README.md", "readme.md", "README.rst", "README.txt", "README.MD")
 
 
-def _github_headers() -> Dict[str, str]:
+def github_headers() -> Dict[str, str]:
     """构造 GitHub 请求头。
 
     配置了 GITHUB_TOKEN 时带上 Authorization：匿名调用只有 60 次/小时，
@@ -74,7 +74,7 @@ class GitHubFetcher:
 
     def __init__(self):
         self.httpx_client = httpx.AsyncClient(
-            timeout=settings.fetch_timeout, headers=_github_headers()
+            timeout=settings.fetch_timeout, headers=github_headers()
         )
 
     async def fetch_trending_repos(self, limit: int = 50, since_days: int = 7) -> List[Dict[str, Any]]:
@@ -159,7 +159,7 @@ async def _readme_via_api(full_name: str, client: httpx.AsyncClient) -> Optional
     # 但先重试一次能省掉一次不必要的降级（降级会丢掉 blob sha）。
     resp = await with_retry(
         lambda: client.get(
-            GITHUB_README_URL.format(full_name=full_name), headers=_github_headers()
+            GITHUB_README_URL.format(full_name=full_name), headers=github_headers()
         ),
         attempts=2,
         base_delay=1.0,
@@ -237,7 +237,7 @@ async def fetch_readme(full_name: str, client: httpx.AsyncClient) -> Optional[Di
 async def fetch_readme_standalone(full_name: str) -> Optional[Dict[str, Any]]:
     """自建客户端的 README 抓取：按需补抓路径不需要持有 GitHubFetcher 实例"""
     async with httpx.AsyncClient(
-        timeout=settings.fetch_timeout, headers=_github_headers()
+        timeout=settings.fetch_timeout, headers=github_headers()
     ) as client:
         return await fetch_readme(full_name, client)
 
@@ -263,7 +263,7 @@ async def attach_readmes(items: List[Dict[str, Any]], concurrency: int = 4) -> L
     semaphore = asyncio.Semaphore(max(1, concurrency))
 
     async with httpx.AsyncClient(
-        timeout=settings.fetch_timeout, headers=_github_headers()
+        timeout=settings.fetch_timeout, headers=github_headers()
     ) as client:
 
         async def _enrich(item: Dict[str, Any]) -> None:
@@ -340,8 +340,16 @@ async def _summarize_batch(batch: List[Dict[str, Any]], kind: str) -> List[Dict[
     try:
         # timeout 按次传入：客户端默认值只作兜底。批量摘要一批 20 条、输出结构化
         # JSON，天然偏长，所以走 summary 档位而不是 chat 档位。
-        result = await asyncio.to_thread(
-            summary_llm.invoke, prompt, timeout=settings.llm_summary_timeout
+        #
+        # 【惰性 import 的理由同 summary_llm】`src.services` 包会连带拉起源码服务层，
+        # 而 discovery 模块只依赖 core。放在函数内，避免模块导入期形成反向依赖。
+        from src.services.llm_usage import tracked_invoke
+
+        result = await tracked_invoke(
+            summary_llm,
+            prompt,
+            purpose="summary",
+            timeout=settings.llm_summary_timeout,
         )
     except Exception as exc:
         circuit_breaker.record_failure(circuit_breaker.LLM_SUMMARY)
@@ -365,11 +373,21 @@ async def _summarize_batch(batch: List[Dict[str, Any]], kind: str) -> List[Dict[
     return parsed
 
 
-async def summarize_items(items: List[Dict[str, Any]], kind: str = "repo", batch_size: int = 20) -> List[Dict[str, Any]]:
+async def summarize_items(
+    items: List[Dict[str, Any]],
+    kind: str = "repo",
+    batch_size: int = 20,
+    on_progress: Optional[Callable[[int, int], None]] = None,
+) -> List[Dict[str, Any]]:
     """用通义千问批量生成结构化中文技术卡片。
 
     分批调用，单批失败会自动降级为逐条重试（每条最多重试 1 次），
     避免一整批数据因个别输出格式问题而丢失摘要。
+
+    Args:
+        on_progress: `(done, total)` 进度回调，**每批结束后**调用一次。
+            这是全链路里最长的一段（每批 20 条一次 LLM 调用），前端轮询的
+            进度条主要靠它推进；异常被吞掉，进度上报失败不影响摘要本身。
     """
     if not items:
         return items
@@ -383,25 +401,34 @@ async def summarize_items(items: List[Dict[str, Any]], kind: str = "repo", batch
             f"摘要进度 {start}/{len(items)}（本批 {len(batch)} 条，"
             f"已耗时 {time.monotonic() - started_at:.0f}s）"
         )
-        parsed = await _summarize_batch(batch, kind=kind)
-        if parsed and len(parsed) >= len(batch):
-            for i, item in enumerate(batch):
-                if isinstance(parsed[i], dict):
-                    _apply_summary(item, parsed[i])
-            continue
-        # 整批失败或返回不完整：先应用能用的，再对缺失项逐条重试 1 次
-        applied = set()
-        if parsed:
-            for i, item in enumerate(batch):
-                if i < len(parsed) and isinstance(parsed[i], dict):
-                    _apply_summary(item, parsed[i])
-                    applied.add(i)
-        for i, it in enumerate(batch):
-            if i in applied:
+        # try/finally 而不是在批尾补一行：整批成功分支有 `continue` 提前跳出，
+        # 补在批尾就会漏报「成功的那一批」——恰好在最常见路径上不推进进度。
+        try:
+            parsed = await _summarize_batch(batch, kind=kind)
+            if parsed and len(parsed) >= len(batch):
+                for i, item in enumerate(batch):
+                    if isinstance(parsed[i], dict):
+                        _apply_summary(item, parsed[i])
                 continue
-            one = await _summarize_batch([it], kind=kind)
-            if one and isinstance(one[0], dict):
-                _apply_summary(it, one[0])
+            # 整批失败或返回不完整：先应用能用的，再对缺失项逐条重试 1 次
+            applied = set()
+            if parsed:
+                for i, item in enumerate(batch):
+                    if i < len(parsed) and isinstance(parsed[i], dict):
+                        _apply_summary(item, parsed[i])
+                        applied.add(i)
+            for i, it in enumerate(batch):
+                if i in applied:
+                    continue
+                one = await _summarize_batch([it], kind=kind)
+                if one and isinstance(one[0], dict):
+                    _apply_summary(it, one[0])
+        finally:
+            if on_progress is not None:
+                try:
+                    on_progress(min(start + len(batch), len(items)), len(items))
+                except Exception as e:  # noqa: BLE001 - 进度不能反过来打断摘要
+                    logger.warning(f"[WARN] 摘要进度回调失败（不影响摘要）: {e}")
 
     applied = sum(1 for it in items if it.get("summary"))
     logger.info(

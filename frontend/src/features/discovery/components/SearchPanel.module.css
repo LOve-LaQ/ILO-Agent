@@ -1,0 +1,436 @@
+/* 搜索面板：输入框是第一视觉锚点，结果列表沿用榜单的密度型排版 */
+
+.panel {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-card);
+  padding: 18px 18px 10px;
+  margin-top: 18px;
+}
+
+/* ============ 头部 ============ */
+.head {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.headText {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.title {
+  font-size: 17px;
+  font-weight: 700;
+  letter-spacing: 0.2px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.icon {
+  font-size: 16px;
+}
+
+.meta {
+  color: var(--text-3);
+  font-size: 12.5px;
+  margin-top: 3px;
+}
+
+.headActions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+}
+
+.seg {
+  display: flex;
+  background: var(--chip-bg);
+  border-radius: 10px;
+  padding: 3px;
+  gap: 2px;
+}
+
+.segBtn {
+  padding: 5px 12px;
+  border-radius: 8px;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--text-2);
+  white-space: nowrap;
+}
+
+.segOn {
+  background: #fff;
+  color: var(--text);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
+}
+
+.busy {
+  font-size: 11.5px;
+  color: var(--text-3);
+  white-space: nowrap;
+}
+
+/* ============ 搜索框 ============ */
+.searchRow {
+  display: flex;
+  gap: 8px;
+  margin: 14px 0 10px;
+}
+
+.input {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 10px 13px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: #fff;
+  color: var(--text);
+  font-size: 14px;
+  font-family: inherit;
+  transition: border-color 0.14s, box-shadow 0.14s;
+}
+
+.input::placeholder {
+  color: var(--text-3);
+}
+
+.input:focus {
+  outline: none;
+  border-color: var(--brand);
+  /* 用外发光而不是改边框粗细：粗细变化会让整行高度抖动 1px */
+  box-shadow: 0 0 0 3px var(--brand-weak);
+}
+
+/* ============ 筛选 ============ */
+.filters {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.chips {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  /* 窄屏放不下时横滑而不是换行：换行会把结果推到第二屏 */
+  scrollbar-width: none;
+  padding-bottom: 2px;
+}
+
+.chips::-webkit-scrollbar {
+  display: none;
+}
+
+.chip {
+  flex: none;
+  padding: 4px 11px;
+  border-radius: 99px;
+  font-size: 12px;
+  color: var(--text-2);
+  background: var(--chip-bg);
+  border: 1px solid transparent;
+  transition: all 0.14s;
+  white-space: nowrap;
+}
+
+.chip:hover {
+  color: var(--text);
+  border-color: var(--border-strong);
+}
+
+.chipOn {
+  background: var(--brand-weak);
+  color: var(--brand);
+  border-color: #d9d9f5;
+  font-weight: 600;
+}
+
+/* ============ 提示条 ============ */
+.notice {
+  margin-top: 10px;
+  padding: 8px 11px;
+  border-radius: 10px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--text-2);
+  background: var(--chip-bg);
+}
+
+.noticeWarn {
+  color: #8a5a00;
+  background: #fdf6e3;
+  border: 1px solid #f2e3bc;
+}
+
+/* ============ 空态 ============ */
+.empty {
+  padding: 26px 8px 20px;
+  text-align: center;
+  color: var(--text-2);
+  font-size: 13px;
+}
+
+.examples {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: center;
+  margin-top: 12px;
+}
+
+.example {
+  padding: 6px 12px;
+  border-radius: 99px;
+  font-size: 12.5px;
+  font-family: var(--mono);
+  color: var(--text-2);
+  background: var(--chip-bg);
+  border: 1px solid transparent;
+  transition: all 0.14s;
+}
+
+.example:hover {
+  color: var(--brand);
+  background: var(--brand-weak);
+  border-color: #d9d9f5;
+}
+
+.loading {
+  padding: 28px 8px;
+  text-align: center;
+  color: var(--text-3);
+  font-size: 13px;
+}
+
+/* ============ 结果列表 ============ */
+.list {
+  list-style: none;
+  margin-top: 8px;
+  transition: opacity 0.15s;
+}
+
+/* 与榜单一致：切筛选时保留上一份结果，但必须明确「更新中」，
+   否则用户点了「Rust」看到一片 Python 会以为筛选坏了 */
+.listBusy {
+  opacity: 0.45;
+}
+
+.row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 12px;
+  padding: 11px 8px;
+  border-radius: 10px;
+}
+
+.row + .row {
+  border-top: 1px solid var(--border);
+}
+
+.row:hover {
+  background: #fafafb;
+}
+
+.main {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+/* 仓库名 + 「已解读」同一行：不加这层 flex，窄屏上长名会把标签挤到下一行行首 */
+.nameRow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.repo {
+  font-family: var(--mono);
+  font-size: 13.5px;
+  font-weight: 650;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+  flex: 0 1 auto;
+}
+
+.repo:hover {
+  color: var(--brand);
+}
+
+.explained {
+  flex: none;
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--brand);
+  background: var(--brand-weak);
+  border-radius: 6px;
+  padding: 1px 6px;
+  white-space: nowrap;
+}
+
+.desc {
+  font-size: 12.5px;
+  color: var(--text-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sub {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 11.5px;
+  color: var(--text-3);
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+.lang {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+}
+
+.lang i {
+  width: 8px;
+  height: 8px;
+  border-radius: 3px;
+  display: inline-block;
+}
+
+.stars {
+  font-variant-numeric: tabular-nums;
+  font-size: 14px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+  min-width: 56px;
+  justify-content: flex-end;
+  padding-top: 1px;
+}
+
+.stars i {
+  color: #f0b429;
+  font-style: normal;
+  font-size: 12px;
+}
+
+/* ============ 错误 ============ */
+.errorBox {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 30px 16px;
+  text-align: center;
+  color: var(--text-2);
+  font-size: 13px;
+}
+
+/* ============ 页脚 ============ */
+.foot {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  border-top: 1px solid var(--border);
+  margin-top: 6px;
+  padding: 9px 2px 4px;
+  font-size: 11.5px;
+  color: var(--text-3);
+}
+
+/* 把实际下发的检索串露出来：用户能看懂「为什么结果是这些」 */
+.query {
+  font-family: var(--mono);
+  font-size: 11px;
+  max-width: 58%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  opacity: 0.8;
+}
+
+/* ============ 窄屏 ============ */
+@media (max-width: 720px) {
+  .panel {
+    padding: 14px 12px 8px;
+    border-radius: 12px;
+  }
+
+  .head {
+    gap: 10px;
+  }
+
+  .title {
+    font-size: 15.5px;
+  }
+
+  /* 排序切换独占一行：和标题挤在一起会把标题压成两行 */
+  .headActions {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .seg {
+    flex: 1;
+  }
+
+  .segBtn {
+    flex: 1;
+    text-align: center;
+  }
+
+  .input {
+    font-size: 15px; /* iOS 聚焦时不会自动放大（<16px 会） */
+  }
+
+  .row {
+    gap: 9px;
+    padding: 10px 4px;
+  }
+
+  .repo {
+    font-size: 12.5px;
+  }
+
+  .desc {
+    font-size: 12px;
+    /* 手机上只给两行：描述再长也读不完，宁可让标题和星数留在首屏 */
+    white-space: normal;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+  }
+
+  .stars {
+    font-size: 13px;
+    min-width: 46px;
+  }
+
+  .foot {
+    flex-direction: column;
+    gap: 3px;
+  }
+
+  .query {
+    max-width: 100%;
+  }
+}

@@ -19,7 +19,7 @@ import os
 import time
 import uuid
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Sequence, Set, Union
 
 from loguru import logger
@@ -39,6 +39,11 @@ BATCH_TRIGGER_SCHEDULED = "scheduled"
 BATCH_TRIGGER_SCRIPT = "script"
 
 UserId = Union[uuid.UUID, str, None]
+
+# 进度回调：`(stage, processed, total)`。同步函数而非协程 —— 它由采集链路在
+# 关键节点直接调用，用 await 会把调用点污染成异步级联，而写入内存任务状态
+# 本来就不需要等待任何东西。
+ProgressCallback = Callable[[str, int, int], None]
 
 # 卡片 `source`（展示名）-> 溯源用的平台标识。
 # 仅用于没有显式 `source_platform` 的历史卡片；新采集由 fetcher 直接给出。
@@ -143,14 +148,20 @@ def start_batch(
     trigger: str = BATCH_TRIGGER_MANUAL,
     operator_user_id: UserId = None,
     params: Optional[Dict[str, Any]] = None,
+    batch_id: Optional[uuid.UUID] = None,
 ) -> Optional[uuid.UUID]:
-    """开一条 running 批次；未配置数据库时返回 None（调用方按「无溯源」继续）"""
+    """开一条 running 批次；未配置数据库时返回 None（调用方按「无溯源」继续）
+
+    `batch_id` 允许调用方预生成：异步任务路径需要让「任务号」与「批次号」是
+    同一个 id，前端只记一个标识，进程重启后也能用它回查批次终态。
+    """
     if not is_database_configured():
         logger.warning("[WARN] 未配置数据库，本次采集不落溯源批次")
         return None
     try:
         with get_session_factory()() as session:
             batch = CollectionBatch(
+                id=batch_id or uuid.uuid4(),
                 kind=kind,
                 trigger=trigger,
                 operator_user_id=_coerce_user_id(operator_user_id),
@@ -193,6 +204,92 @@ def finish_batch(
             session.commit()
     except Exception as e:  # noqa: BLE001
         logger.warning(f"[WARN] 回填采集批次失败: {e}")
+
+
+# 孤儿批次判定阈值：单次抓取最长几分钟，超过这个时长还 running 就一定是进程没了
+ORPHAN_THRESHOLD_MINUTES = 30
+
+
+def get_batch(batch_id: Union[uuid.UUID, str]) -> Optional[Dict[str, Any]]:
+    """读一条批次的终态（异步任务内存进度丢失后的兜底查询）
+
+    异步接口把批次号当作任务号，所以进程重启后前端手里那个 id 仍然有效 ——
+    过程看不到，但「跑完了没有、新增几条、为什么失败」都还在库里。
+    """
+    if not is_database_configured():
+        return None
+    try:
+        parsed = batch_id if isinstance(batch_id, uuid.UUID) else uuid.UUID(str(batch_id))
+    except (TypeError, ValueError):
+        return None
+
+    try:
+        with get_session_factory()() as session:
+            batch = session.get(CollectionBatch, parsed)
+            if batch is None:
+                return None
+            # 耗时从库里算：内存进度丢了不代表「跑了多久」也丢了
+            elapsed_ms = 0
+            if batch.started_at and batch.finished_at:
+                elapsed_ms = max(
+                    0,
+                    int((batch.finished_at - batch.started_at).total_seconds() * 1000),
+                )
+            return {
+                "batch_id": str(batch.id),
+                "kind": batch.kind,
+                "trigger": batch.trigger,
+                "status": batch.status,
+                "fetched_count": batch.fetched_count,
+                "new_count": batch.new_count,
+                "skipped_count": batch.skipped_count,
+                "failed_count": batch.failed_count,
+                "error": batch.error,
+                "elapsed_ms": elapsed_ms,
+                "started_at": batch.started_at.isoformat() if batch.started_at else None,
+                "finished_at": batch.finished_at.isoformat() if batch.finished_at else None,
+            }
+    except Exception as e:  # noqa: BLE001 - 查询失败按「查不到」处理
+        logger.warning(f"[WARN] 读取采集批次失败: {batch_id} - {e}")
+        return None
+
+
+def recover_orphan_batches(*, older_than_minutes: int = ORPHAN_THRESHOLD_MINUTES) -> int:
+    """把因进程重启而永远停在 running 的批次收尾为 failed，返回处理条数。
+
+    **为什么必须在启动时做**：进程被 kill（热重载、崩溃、容器重启）时，正在跑的
+    采集任务没有机会执行 `finish_batch`，批次就永远停在 running。此后运维看到一条
+    「进行中」的记录，对应的任务却早已不存在；更糟的是它会让「最近一次采集到底
+    成没成」这个最基本的运维问题无法回答。
+
+    只处理超过阈值的老记录：正常任务本来就会在几分钟内结束，把阈值定得太小会
+    误伤「正在另一台 worker 上跑」的批次。
+    """
+    if not is_database_configured():
+        return 0
+    try:
+        cutoff = _now() - timedelta(minutes=older_than_minutes)
+        with get_session_factory()() as session:
+            result = session.execute(
+                update(CollectionBatch)
+                .where(
+                    CollectionBatch.status == "running",
+                    CollectionBatch.started_at < cutoff,
+                )
+                .values(
+                    status="failed",
+                    error="任务被进程重启中断（启动时自动收尾）",
+                    finished_at=_now(),
+                )
+            )
+            session.commit()
+            count = int(result.rowcount or 0)
+        if count:
+            logger.warning(f"[WARN] 启动自检：{count} 条中断的采集批次已标记为 failed")
+        return count
+    except Exception as e:  # noqa: BLE001 - 启动自检失败不该阻断服务启动
+        logger.warning(f"[WARN] 收尾孤儿批次失败（不影响启动）: {e}")
+        return 0
 
 
 def get_collected_ids(item_ids: Sequence[str]) -> Set[str]:
@@ -643,8 +740,16 @@ async def _generate_digest(record: CollectionRecord, item_id: str, content: str)
     _started = time.monotonic()
     try:
         # timeout 按次传入：客户端默认值只作兜底；导读与批量摘要同档位。
-        result = await asyncio.to_thread(
-            summary_llm.invoke, prompt, timeout=settings.llm_summary_timeout
+        #
+        # 【为什么用 tracked_invoke】导读是「按卡片计费」的接口，成本必须落到账本上，
+        # 否则管理页只能看到对话的成本，而实际最贵的往往是这一条。包装后异常行为不变。
+        from src.services.llm_usage import tracked_invoke
+
+        result = await tracked_invoke(
+            summary_llm,
+            prompt,
+            purpose="digest",
+            timeout=settings.llm_summary_timeout,
         )
     except Exception as e:  # noqa: BLE001 - 生成失败降级，不让端点 500
         circuit_breaker.record_failure(circuit_breaker.LLM_SUMMARY)
@@ -794,6 +899,8 @@ async def collect_items(
     summarize: bool = True,
     persist: bool = True,
     enrich: Optional[Callable[[List[Dict[str, Any]]], Awaitable[List[Dict[str, Any]]]]] = None,
+    batch_id: Optional[uuid.UUID] = None,
+    on_progress: Optional[ProgressCallback] = None,
 ) -> CollectResult:
     """抓取 -> 去重 -> 摘要 -> 入库 -> 记录溯源 的统一编排
 
@@ -808,16 +915,32 @@ async def collect_items(
             等知识库恢复后这批卡片会被永久跳过
         enrich: 可选的富化钩子（如补 README 原文快照），在去重与摘要之后调用，
             因此只作用于真正入库的新卡；抛异常只记警告，不影响采集主流程
+        batch_id: 已开好的批次号。异步任务路径会先 `start_batch()` 拿到批次号，
+            再把它同时当作任务 id 传进来 —— 这样「进度」和「终态真相」共用一个
+            id，进程重启丢了内存进度时，前端仍能按同一个 id 查到批次结局
+        on_progress: 进度回调 `(stage, processed, total)`，供异步任务向轮询端
+            上报真实进度。同步调用、异常被吞 —— 进度上报绝不能反过来影响采集
     """
     from src.modules.discovery.github_fetcher import summarize_items
 
-    batch_id = start_batch(
-        kind,
-        trigger=trigger,
-        operator_user_id=operator_user_id,
-        params=params,
-    )
+    def _progress(stage: str, processed: int = 0, total: int = 0) -> None:
+        """上报进度：吞掉一切异常（上报失败不该让整批采集失败）"""
+        if on_progress is None:
+            return
+        try:
+            on_progress(stage, processed, total)
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"[WARN] 采集进度上报失败（不影响采集）: {e}")
 
+    if batch_id is None:
+        batch_id = start_batch(
+            kind,
+            trigger=trigger,
+            operator_user_id=operator_user_id,
+            params=params,
+        )
+
+    _progress("fetching")
     try:
         items = await fetch()
     except Exception as e:  # noqa: BLE001 - 采集异常要落批次再往上抛
@@ -842,6 +965,7 @@ async def collect_items(
     try:
         fetched_count = len(items)
         ids = [str(i.get("id")) for i in items]
+        _progress("deduping", 0, fetched_count)
         if force:
             new_items, skipped_count = list(items), 0
         else:
@@ -850,8 +974,15 @@ async def collect_items(
             skipped_count = fetched_count - len(new_items)
 
         if summarize and new_items:
+            _progress("summarizing", 0, len(new_items))
             try:
-                new_items = await summarize_items(new_items, kind=kind)
+                new_items = await summarize_items(
+                    new_items,
+                    kind=kind,
+                    # 摘要是最长的一段（每批 20 条一次 LLM），把真实批次进度
+                    # 透传给轮询端；否则前端只能靠猜
+                    on_progress=lambda done, total: _progress("summarizing", done, total),
+                )
             except Exception as e:  # noqa: BLE001
                 # 摘要链路的整体异常（`_summarize_batch` 之外的意外：模块导入失败、
                 # 客户端构造失败、网络库抛错等）。绝不能让它冒出去 —— 那样批次会
@@ -862,42 +993,52 @@ async def collect_items(
 
         # 富化放在去重与摘要之后：只为真正要入库的新卡付费，已采集卡片不重复抓
         if enrich is not None and new_items:
+            # 不报 total：这个阶段是逐条抓 README，没有「批」的概念，报个 0/N
+            # 只会让用户看到「已处理 0/1」卡住不动。前端此时用不确定态更诚实。
+            _progress("enriching")
             try:
                 new_items = await enrich(new_items)
             except Exception as e:  # noqa: BLE001 - 富化是锦上添花，不该让整批失败
                 logger.warning(f"[WARN] 卡片富化失败（不影响采集）: {e}")
 
         failed_count = 0
-        for item in new_items:
-            item_id = str(item.get("id") or "")
-            # 不要求摘要时，卡片按原样就是终态
-            finalized = True if not summarize else _summary_applied(item)
+        _progress("storing", 0, len(new_items))
+        for done, item in enumerate(new_items, start=1):
+            # 用 try/finally 而不是在三个出口各写一次进度：循环体里有两条
+            # `continue`（摘要闸门未过、单条入库失败），逐个补上报迟早会漏一个，
+            # 于是进度条在最需要它的时候停住不动。
+            try:
+                item_id = str(item.get("id") or "")
+                # 不要求摘要时，卡片按原样就是终态
+                finalized = True if not summarize else _summary_applied(item)
 
-            # 未通过摘要闸门的卡片**绝不能入库**：卡片介绍直接展示 summary，一旦把
-            # 「摘要没跑成、还带着英文原描述」的卡片写进知识库，用户看到的就是一张
-            # 英文卡片，而且它只有在下一轮采集再次碰到同一个仓库时才可能被覆盖
-            # （榜单早已换了一批）。所以入库必须后置到闸门之后。
-            if not finalized:
-                failed_count += 1
-                if persist:
-                    record_item(batch_id, item, status="failed")
-                logger.warning(f"[WARN] 摘要未中文化，暂不入库: {item_id}")
-                continue
-
-            if store is not None:
-                try:
-                    await store(item)
-                except Exception as e:  # noqa: BLE001 - 单条入库失败不影响整批
+                # 未通过摘要闸门的卡片**绝不能入库**：卡片介绍直接展示 summary，一旦把
+                # 「摘要没跑成、还带着英文原描述」的卡片写进知识库，用户看到的就是一张
+                # 英文卡片，而且它只有在下一轮采集再次碰到同一个仓库时才可能被覆盖
+                # （榜单早已换了一批）。所以入库必须后置到闸门之后。
+                if not finalized:
                     failed_count += 1
                     if persist:
                         record_item(batch_id, item, status="failed")
-                    logger.warning(f"[WARN] 卡片入库失败: {item_id} - {e}")
-                    # 不写 Redis 标记：下次还能重试，避免「永久丢失」被缓存掩盖
+                    logger.warning(f"[WARN] 摘要未中文化，暂不入库: {item_id}")
                     continue
 
-            if persist:
-                record_item(batch_id, item, status="summarized")
-                _redis_mark([item_id])
+                if store is not None:
+                    try:
+                        await store(item)
+                    except Exception as e:  # noqa: BLE001 - 单条入库失败不影响整批
+                        failed_count += 1
+                        if persist:
+                            record_item(batch_id, item, status="failed")
+                        logger.warning(f"[WARN] 卡片入库失败: {item_id} - {e}")
+                        # 不写 Redis 标记：下次还能重试，避免「永久丢失」被缓存掩盖
+                        continue
+
+                if persist:
+                    record_item(batch_id, item, status="summarized")
+                    _redis_mark([item_id])
+            finally:
+                _progress("storing", done, len(new_items))
 
         if failed_count == 0:
             batch_status = "succeeded"
@@ -961,11 +1102,13 @@ __all__ = [
     "build_provenance",
     "collect_items",
     "finish_batch",
+    "get_batch",
     "get_collected_ids",
     "get_or_fetch_card_content",
     "get_provenance",
     "get_redis_client",
     "is_collected",
     "record_item",
+    "recover_orphan_batches",
     "start_batch",
 ]

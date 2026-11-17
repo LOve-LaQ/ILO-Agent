@@ -1,0 +1,518 @@
+/* LLM 成本面板：沿用 tokens.css 的变量，与管理后台其它区块同一套语言 */
+
+.section {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-card);
+  padding: 20px;
+}
+
+.head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 14px;
+}
+
+.title {
+  margin: 0 0 6px;
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.hint {
+  margin: 0;
+  max-width: 62ch;
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--text-2);
+}
+
+.actions {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.windowGroup {
+  display: inline-flex;
+  border: 1px solid var(--border-strong);
+  border-radius: 9px;
+  overflow: hidden;
+  background: var(--surface);
+}
+
+.windowBtn {
+  border: none;
+  background: transparent;
+  padding: 6px 11px;
+  font-size: 12.5px;
+  color: var(--text-2);
+  cursor: pointer;
+  transition: background 0.14s ease, color 0.14s ease;
+}
+
+.windowBtn + .windowBtn {
+  border-left: 1px solid var(--border);
+}
+
+.windowBtn:hover {
+  background: var(--chip-bg);
+}
+
+.windowActive {
+  background: var(--brand-weak);
+  color: var(--brand-strong);
+  font-weight: 600;
+}
+
+.placeholder {
+  padding: 18px 0;
+  font-size: 13px;
+  color: var(--text-3);
+}
+
+.notice {
+  border: 1px solid var(--danger-border);
+  background: var(--danger-weak);
+  border-radius: 10px;
+  padding: 14px 16px;
+}
+
+.noticeTitle {
+  font-size: 13.5px;
+  font-weight: 700;
+  color: var(--danger);
+  margin-bottom: 6px;
+}
+
+.noticeBody {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.7;
+  color: var(--text-2);
+}
+
+/* ============ KPI ============ */
+.kpiGrid {
+  display: grid;
+  /* minmax(0,1fr)：不加这个，长数字会把 grid 撑破（窄屏横向溢出） */
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.kpi {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 12px 13px;
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  background: #fafafb;
+  min-width: 0;
+}
+
+.kpiEmphasis {
+  background: var(--brand-weak);
+  border-color: #dedcf8;
+}
+
+.kpiLabel {
+  font-size: 11.5px;
+  color: var(--text-3);
+}
+
+.kpiValue {
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: -0.2px;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+.kpiHint {
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--text-2);
+  word-break: break-word;
+}
+
+/* ============ 预算条 ============ */
+.budgetRow {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.budgetTrack {
+  flex: 1;
+  height: 7px;
+  border-radius: 999px;
+  background: var(--chip-bg);
+  overflow: hidden;
+}
+
+.budgetFill {
+  height: 100%;
+  border-radius: 999px;
+  background: var(--brand);
+  transition: width 0.3s ease;
+}
+
+.budgetDanger {
+  background: var(--danger);
+}
+
+.budgetText {
+  flex: none;
+  font-size: 11.5px;
+  color: var(--text-2);
+}
+
+/* ============ 柱状图 ============ */
+.chartBlock {
+  margin-top: 18px;
+}
+
+.blockHead {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.blockTitle {
+  font-size: 13px;
+  font-weight: 650;
+  color: var(--text);
+}
+
+.blockMeta {
+  font-size: 11.5px;
+  color: var(--text-3);
+}
+
+.chartWrap {
+  padding: 0 2px;
+}
+
+.chart {
+  display: flex;
+  align-items: flex-end;
+  gap: 4px;
+  height: 148px;
+  border-bottom: 1px solid var(--border);
+}
+
+.barCol {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+}
+
+.barFill {
+  width: 100%;
+  border-radius: 4px 4px 1px 1px;
+  background: linear-gradient(180deg, #7a7ae4, var(--brand));
+  transition: height 0.25s ease;
+}
+
+.barEmpty {
+  background: var(--border-strong);
+  border-radius: 1px;
+}
+
+.axis {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 5px;
+  font-size: 10.5px;
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ============ 拆分 ============ */
+.splitGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  margin-top: 20px;
+}
+
+.block {
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  padding: 13px 14px;
+  min-width: 0;
+}
+
+.purposeList,
+.modelList,
+.notes {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.purposeRow + .purposeRow {
+  margin-top: 12px;
+}
+
+.purposeTop {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.purposeLabel {
+  font-size: 12.5px;
+  color: var(--text);
+}
+
+.purposeCost {
+  font-size: 12.5px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+
+.purposeTrack {
+  height: 6px;
+  margin: 5px 0 4px;
+  border-radius: 999px;
+  background: var(--chip-bg);
+  overflow: hidden;
+}
+
+.purposeFill {
+  height: 100%;
+  border-radius: 999px;
+  background: var(--brand);
+}
+
+.purposeMeta {
+  font-size: 11px;
+  color: var(--text-3);
+}
+
+.modelRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 9px 0;
+  border-top: 1px solid var(--border);
+}
+
+.modelRow:first-child {
+  border-top: none;
+  padding-top: 2px;
+}
+
+.modelMain {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+.modelName {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--brand-strong);
+  background: var(--brand-weak);
+  border-radius: 6px;
+  padding: 1px 6px;
+  word-break: break-all;
+}
+
+.modelProvider {
+  font-size: 11px;
+  color: var(--text-3);
+}
+
+.modelWarn {
+  font-size: 10.5px;
+  color: var(--danger);
+  background: var(--danger-weak);
+  border: 1px solid var(--danger-border);
+  border-radius: 999px;
+  padding: 0 6px;
+}
+
+.modelSide {
+  flex: none;
+  text-align: right;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.modelCost {
+  font-size: 12.5px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+
+.modelCalls {
+  font-size: 10.5px;
+  color: var(--text-3);
+}
+
+.blockFoot {
+  margin: 10px 0 0;
+  padding-top: 9px;
+  border-top: 1px solid var(--border);
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--text-3);
+}
+
+/* ============ 预测说明 ============ */
+.forecastBox {
+  margin-top: 16px;
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  background: #fafafb;
+  padding: 13px 14px;
+}
+
+.forecastHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.confidence {
+  font-size: 11px;
+  color: #1a7f4b;
+  background: #eaf6ef;
+  border: 1px solid #cbe7d7;
+  border-radius: 999px;
+  padding: 1px 8px;
+}
+
+.confidenceWarn {
+  color: #8a5a12;
+  background: #fdf6e9;
+  border-color: #f0e0c2;
+}
+
+.forecastBody {
+  margin: 8px 0 0;
+  font-size: 12.5px;
+  line-height: 1.7;
+  color: var(--text-2);
+}
+
+.notes {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.notes li {
+  position: relative;
+  padding-left: 13px;
+  font-size: 12.5px;
+  line-height: 1.65;
+  color: var(--text);
+}
+
+.notes li::before {
+  content: '';
+  position: absolute;
+  left: 2px;
+  top: 8px;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--brand);
+}
+
+.disclaimer {
+  margin: 10px 0 0;
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--text-3);
+}
+
+/* ============ 平板 / 手机 ============ */
+@media (max-width: 1024px) {
+  .kpiGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .splitGrid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 640px) {
+  .section {
+    padding: 16px 14px;
+  }
+
+  .head {
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .actions {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .windowBtn {
+    padding: 7px 12px;
+    /* 移动端点击区至少 32px 高，避免误触 */
+    font-size: 13px;
+  }
+
+  .kpi {
+    padding: 11px 12px;
+  }
+
+  .kpiValue {
+    font-size: 18px;
+  }
+
+  .chart {
+    height: 122px;
+    gap: 3px;
+  }
+
+  .axis {
+    font-size: 10px;
+  }
+
+  .budgetRow {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 6px;
+  }
+
+  /* 【必须显式还原】.budgetTrack 桌面端写的是 flex:1（横向布局里表示「占满剩余宽度」）；
+     改成纵向布局后，flex:1 会变成「占满剩余高度」，而高度是 auto → 整条轨道塌成 0，
+     预算条会直接消失。 */
+  .budgetTrack {
+    flex: none;
+    width: 100%;
+  }
+
+  .budgetText {
+    font-size: 11px;
+  }
+}

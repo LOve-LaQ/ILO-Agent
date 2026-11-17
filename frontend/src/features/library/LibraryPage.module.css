@@ -639,3 +639,91 @@
     max-width: 100%;
   }
 }
+
+/* ============ 手机 ============ */
+@media (max-width: 640px) {
+  .navInner {
+    height: 56px;
+    gap: 10px;
+  }
+
+  .brand {
+    font-size: 14px;
+  }
+
+  .main {
+    padding-top: 16px;
+    padding-bottom: calc(40px + env(safe-area-inset-bottom));
+  }
+
+  .profile {
+    padding: 16px 14px;
+  }
+
+  .profileName {
+    font-size: 16.5px;
+  }
+
+  /* 邮箱 + 注册时间一行放不下，允许折两行，而不是截成「注册于 2026…」 */
+  .profileSub {
+    white-space: normal;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+  }
+
+  .stats {
+    margin-top: 14px;
+    padding-top: 12px;
+    gap: 8px;
+  }
+
+  .statValue {
+    font-size: 19px;
+  }
+
+  /* tab 平分整行，finger 可点面积从 31px 高抬到 38px 左右 */
+  .tabs {
+    width: 100%;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .tabs::-webkit-scrollbar {
+    display: none;
+  }
+
+  .tab {
+    flex: none;
+    justify-content: center;
+    padding: 7px 11px;
+    /* 「行为时间线」这类长标签在均分宽度下会折成「行为时间 / 线」 */
+    white-space: nowrap;
+  }
+
+  .rowMain {
+    padding: 13px 14px;
+  }
+
+  .pvWrap {
+    padding: 12px 14px;
+  }
+
+  .pvLabel {
+    width: 66px;
+  }
+
+  .splitAside {
+    padding: 12px;
+  }
+
+  /* 时间戳原本靠 margin-left:auto 顶到右侧，窄屏会和标签互相挤压，改为独占一行 */
+  .timelineTime {
+    margin-left: 0;
+    width: 100%;
+  }
+
+  .timelineHead {
+    gap: 6px;
+  }
+}

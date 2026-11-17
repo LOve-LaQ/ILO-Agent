@@ -34,6 +34,8 @@ from src.core.deadline import clamp_timeout
 from src.core.errors import ERROR_RESPONSES, ILOException
 from src.core.rate_limit import LEARNING_CHAT_IP, rate_limit
 from src.core.resilience import log_downstream_failure
+from src.services.feature_flags import require_feature
+from src.services.llm_usage import tracked_invoke
 from src.schemas.learning import (
     ChatRequest,
     ChatResponse,
@@ -494,7 +496,14 @@ async def create_learning_session(
 async def send_push_notification(
     request: Request, data: PushRequest, user: CurrentUser
 ) -> PushResponse:
-    """发送推送通知（基于真实会话上下文）"""
+    """发送推送通知（基于真实会话上下文）
+
+    【功能开关】`push_notification` 会生成讲解，属于 `learning_chat` 模块。
+    模块关闭时整个「讲解 → 对话 → 追问」链路一起停，而不是只停其中几个接口：
+    半开半关会让用户点完「开始讲解」才在下一步撞墙，比直接说明更难理解。
+    """
+    require_feature("learning_chat")
+
     sm = await _get_state_machine()
     context = await _load_session_context(data.session_id, str(user.id))
 
@@ -546,7 +555,14 @@ async def chat_with_ai(request: Request, data: ChatRequest, user: CurrentUser) -
 
     引用只到**块**、不到**句子**：句子级溯源要模型逐句输出编号再回校验，代价是
     多一轮解析且不可靠（模型会编编号）。给块级引用是诚实的。
+
+    【功能开关】`learning_chat` 关闭时 503，而不是退回 `_generate_fallback_response`
+    的固定话术：那段 fallback 的直接使用者是「LLM 不可用时的降级」，它给出的答案
+    与用户的问题无关，作为「管理员主动关闭」的表现只会让人以为系统坏了。
+    关闭就要明确说「已关闭」。
     """
+    require_feature("learning_chat")
+
     from src.modules.agent.state_machine import llm, LLM_AVAILABLE
 
     session_id = data.session_id
@@ -660,8 +676,14 @@ async def chat_with_ai(request: Request, data: ChatRequest, user: CurrentUser) -
             # 传字符串时 LangChain 会包成 HumanMessage，系统提示词其实没走 system 角色；
             # 而且历史里通常已经含本轮提问，不组装消息列表就会重复发一遍。
             messages = _build_chat_messages(system_prompt, history, user_message)
-            response = await asyncio.to_thread(
-                llm.invoke, messages, timeout=llm_timeout
+            # tracked_invoke 与裸 `to_thread(llm.invoke, ...)` 完全同构（同样的线程池、
+            # 同样的 timeout、异常同样上抛），额外按「学习对话」记一行用量账。
+            response = await tracked_invoke(
+                llm,
+                messages,
+                purpose="chat",
+                user_id=str(user.id),
+                timeout=llm_timeout,
             )
             ai_response = (response.content or "").strip()
             if not ai_response:
@@ -748,7 +770,12 @@ async def process_user_response(
     ## 请求体
     - session_id: 会话 ID
     - user_input: 用户输入
+
+    【功能开关】与 /push、/chat 共用 `learning_chat`：这一步会生成下一段讲解
+    与测验题，是整条链路里 LLM 调用最密集的一步。
     """
+    require_feature("learning_chat")
+
     sm = await _get_state_machine()
     context = await _load_session_context(data.session_id, str(user.id))
 

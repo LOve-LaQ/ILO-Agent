@@ -2,7 +2,24 @@
 <html lang="zh-CN">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- viewport-fit=cover：让页面延伸到刘海屏/圆角屏，配合 env(safe-area-inset-*) 使用。
+         不加 maximum-scale：禁止缩放会破坏无障碍，改用 16px 输入框避免 iOS 聚焦时自动放大 -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="description" content="ILO 技术情报官：抓取前沿技术资讯、AI 中文讲解、测验巩固与间隔复习。" />
+    <!-- 移动端浏览器 / 内置 WebView 的地址栏配色，避免顶部一条与页面割裂的白边 -->
+    <meta name="theme-color" content="#f7f7f8" />
+    <meta name="color-scheme" content="light" />
+    <!-- iOS 加入主屏后以独立窗口打开（安卓对应 meta 为 mobile-web-app-capable） -->
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="apple-mobile-web-app-title" content="ILO 情报官" />
+    <!-- 关掉 iOS 对电话/邮箱的自动识别，避免用户名、邮箱被渲染成蓝色链接 -->
+    <meta name="format-detection" content="telephone=no, email=no, address=no" />
+    <!-- PWA：手机「添加到主屏幕」后以独立窗口全屏打开，不显示地址栏 -->
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png" />
     <title>ILO 技术情报官 · AI 技术情报与学习助手</title>
   </head>
   <body>

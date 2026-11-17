@@ -57,6 +57,12 @@ class Settings(BaseSettings):
     # jwt_secret 必须 >= 32 字节（PyJWT 对 HS256 有最短长度告警）
     jwt_secret: str = ""
     jwt_algorithm: str = "HS256"
+
+    # 管理员白名单（阶段 6）：逗号分隔的邮箱，命中即视为 admin（见 core/roles.py）。
+    # 这是「部署者意志」的兜底通道 —— 万一管理员误把自己的角色改掉、或角色列被
+    # 批量重置，配置里这个人依然能进后台把权限改回来。没有这条通道，一次误操作
+    # 就会把管理入口永久锁死。
+    admin_emails: str = ""
     access_token_expire_minutes: int = 30
     refresh_token_expire_days: int = 14
     refresh_cookie_name: str = "ilo_refresh"
@@ -91,6 +97,27 @@ class Settings(BaseSettings):
     # 首屏资讯（/discover/news）：本身是廉价读，但登录用户会走一次向量检索 +
     # 全量候选排序；不给额度就留下一个可脚本化放大的读口（每刷一次都扫全库）
     news_rate_limit_per_hour: int = 600
+    # GitHub 榜单（/discover/rankings）：默认命中缓存几乎零成本，但缓存穿透时
+    # 每次都要打一次 GitHub Search API。Search API 认证后限额是 30 次/分钟，
+    # 必须有一个按 IP 的兜底配额，否则一个脚本就能把配额刷光、全站榜单一起降级
+    ranking_rate_limit_per_hour: int = 240
+    # 榜单新鲜缓存时长：GitHub 侧的 star 数变化本身就是分钟级噪声，
+    # 30 分钟足够「看起来是实时的」，又能把 API 调用压到个位数
+    ranking_cache_ttl_seconds: int = 1800
+    # 过期缓存保留时长：GitHub 不可达（限流 / 5xx / 断网）时靠它兜底，
+    # 宁可展示一份 6 小时前的榜单，也比整页「暂无数据」有用
+    ranking_stale_ttl_seconds: int = 21600
+
+    # 仓库搜索（/discover/search）
+    # 配额是有硬上限的：GitHub Search API 未认证只有 10 次/分钟、认证 30 次/分钟
+    # （比普通 API 的 60 次/小时还紧）。所以这里和榜单的策略不同 —— 榜单是「预置
+    # 24 个缓存键」，搜索的键由用户输入决定，只能靠「短键 + 较长 TTL + 严格限流」
+    # 三条一起兜：缓存 15 分钟，并按 IP 限制每小时请求数。
+    # 前端也因此不做输入即搜（as-you-type）：每敲一个字打一次 API，10 次/分钟的
+    # 配额在一句话之内就烧完了，全站搜索会一起降级。
+    search_rate_limit_per_hour: int = 120
+    search_cache_ttl_seconds: int = 900
+    search_stale_ttl_seconds: int = 3600
     # 撤销注销（/auth/account/delete/cancel）：未登录可调且要校验密码，
     # 不设防就会变成绕开登录锁定的口令爆破旁路
     account_cancel_rate_limit_per_hour: int = 10
@@ -122,6 +149,16 @@ class Settings(BaseSettings):
     smtp_from: str = ""
     smtp_use_tls: bool = True
     frontend_base_url: str = "http://127.0.0.1:5173"
+
+    # 单端口同源部署（演示 / 内网穿透）
+    # 开启后由后端直接托管前端构建产物，整个站点只有一个对外端口：
+    #   - 反代 / 隧道只需映射 8000，不需要再起 nginx 或第二条隧道
+    #   - 前端与 API 同源，CORS 与 refresh cookie 的 SameSite 约束天然满足
+    # 未开启时保持开发姿势（vite:5173 + 后端:8000 双端口）。
+    serve_frontend: bool = False
+    # dist 目录；留空默认取 BACKEND_ROOT/../frontend/dist
+    frontend_dist: str = ""
+
     password_reset_expire_minutes: int = 30
     # 邮箱确认链接有效期。做得比重置密码长得多：确认邮箱不是安全敏感操作，
     # 只是让用户有机会发现「邮箱填错了」，有效期长些才不会一直提示未验证。
@@ -150,6 +187,11 @@ class Settings(BaseSettings):
     # 参与构建画像的候选卡片上限（按信号权重取 top-N）
     # 既是成本闸门（每张要取向量），也避免「早期一次性浏览」长期主导画像
     interest_profile_max_candidates: int = 200
+    # 个性化候选池（带向量的卡片集）在本进程内缓存多久（秒）。
+    # 一次带向量 scroll 要拉 500×1536 个浮点（本机 ~450ms），而首页只要 3 张卡；
+    # 缓存后排序只剩一次矩阵乘。置 0 表示不缓存（每次重新拉，仅排障时用）。
+    # 写路径（upsert）会主动作废，TTL 只是绕过写路径时的保险。
+    candidate_pool_ttl_seconds: int = 120
 
     # 检索增强生成（RAG）接进问答
     # 【为什么必须留一个总开关】实测命中率 hit@5 是 77.8%，且**是乐观上界**
@@ -172,6 +214,12 @@ class Settings(BaseSettings):
     llm_chat_timeout: float = 50.0      # 对话 / 讲解（用户在等，必须有界）
     llm_summary_timeout: float = 95.0   # 批量摘要（batch_size=20，天然偏长但仍需有界）
     llm_judge_timeout: float = 35.0     # eval 裁判（仅 pytest -m eval 使用）
+
+    # LLM 月度预算（元）：管理后台的成本面板据此给出「还剩几天」与超支提示。
+    # 【为什么要有默认值】没有预算金额时，「预测本月 ¥12」只是个数，读者无法判断
+    # 该不该紧张。给一个偏紧的默认值（30 元）让预警从第一天就有效；
+    # 配 0 表示不设预算，面板只显示花费与预测，不做超支判断。
+    llm_monthly_budget_cny: float = 30.0
 
     # 请求级超时预算（秒）：从入口往下传，约束「这一次请求总共能花多久」。
     # 【为什么需要】每层各拍一个固定值在链路一长就失效：Redis 1s + PG 3s +

@@ -43,7 +43,7 @@ export interface paths {
         put?: never;
         /**
          * Refresh News
-         * @description 手动触发抓取 GitHub 热门仓库（自动翻页），去重后只对新仓库做摘要，存入知识库
+         * @description 提交一次 GitHub 热门仓库抓取任务，**立即返回**（202）
          *
          *     - force=True 时忽略去重，对抓到的仓库全部重新摘要并覆盖写入（用于升级摘要规范/向量）
          *     - 抓取过程统一走 collection_service：批次、溯源记录、去重真相源都落在 PostgreSQL，
@@ -51,11 +51,19 @@ export interface paths {
          *     - limit 限定 1..100：上游翻页上限 10 页 × per_page 100，但单次请求不该任意放大，
          *       否则匿名调用方就能用一次请求把外部 API 与 LLM 成本推到上限
          *
-         *     【当前为同步执行，长任务应改为异步队列】抓取 + 多批摘要整条链路在一次请求内
-         *     跑完，单次可能耗时几分钟。**不要**靠把超时设大来「解决」——那只是把问题推给
-         *     网关和用户。正确方向是异步化（接口立即返回 batch_id，前端轮询批次状态）；
-         *     本项目已有 collection_service 的批次表，状态机已具备，只需把执行挪到后台。
-         *     本任务未实施该改造，此处如实标注，避免后续维护者误以为这是最终形态。
+         *     【为什么是异步】抓取 + 多批摘要整条链路要 1~3 分钟，同步执行会被浏览器与
+         *     反向代理先超时切断 —— 用户看到网络错误并重试，而服务端还在继续抓取和调用
+         *     LLM，等于一次误操作付两遍钱。这里改为立即返回 `task_id`（= 采集批次号），
+         *     由 `GET /discover/tasks/{task_id}` 轮询真实进度。
+         *     **边界**：任务跑在当前进程的事件循环里，多 worker 部署时需要换成外部队列
+         *     （幂等锁已在 Redis 上，不会因此重复触发）。
+         *
+         *     【并发触发】同一主体（登录用户 / 匿名 IP）同时只允许一个抓取任务，重复提交
+         *     返回 409 并在 detail 里带上正在跑的那个 task_id —— 前端据此接着看进度，而不是
+         *     傻等或报错。
+         *
+         *     【功能开关】`discover_refresh` 关闭时直接 503：这是成本最高的入口
+         *     （一次调用 = 数十次 LLM 摘要），管理员需要一个能立刻止血的物理开关。
          */
         post: operations["refresh_news_api_v1_discover_refresh_post"];
         delete?: never;
@@ -101,14 +109,124 @@ export interface paths {
         put?: never;
         /**
          * Refresh Articles
-         * @description 手动触发抓取多平台热门技术文章，去重后只对新文章做摘要，存入知识库
+         * @description 提交一次多平台技术文章抓取任务，**立即返回**（202）
          *
          *     - force=True 时忽略去重，对抓到的文章全部重新摘要并覆盖写入（用于升级摘要规范/向量）
          *     - 与 /refresh 共用 collection_service，一次调用 = 一条采集批次 + 每张卡片一条溯源记录
          *     - 与 /refresh 共用同一 IP 节流桶：两者都是「触发外抓 + LLM 摘要」的成本放大面，
          *       分开配额等于给同一件事开两条通道
+         *     - 与 /refresh 共用 `discover_refresh` 开关：一条通道关掉、另一条还开着，
+         *       等于开关形同虚设
+         *     - 与 /refresh 共用幂等锁：两条通道同时跑会重复占用同一批 LLM 配额
          */
         post: operations["refresh_articles_api_v1_discover_refresh_articles_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/discover/tasks/{task_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Collect Task
+         * @description 查询采集任务的真实进度
+         *
+         *     两段式，因为内存任务表活不过进程重启：
+         *
+         *     1. **内存命中** → 返回实时阶段与计数（正常路径，前端每秒拉一次）
+         *     2. **内存未命中** → 回退查 `collection_batches`。任务号就是批次号，所以重启
+         *        后前端手里那个 id 依然有效：过程不可得，但「跑完没有、新增几条、为什么
+         *        失败」都还在。此时 `progress_lost=true` 明确标注，不假装还在跑。
+         *
+         *     两者都没有（id 打错 / 批次超期清理）才 404。
+         */
+        get: operations["get_collect_task_api_v1_discover_tasks__task_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/discover/rankings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Github Rankings
+         * @description GitHub 新星榜：窗口内创建、按 star 总数排序的高星项目（只读，零 LLM 成本）
+         *
+         *     ## 口径
+         *     只统计**创建时间**落在窗口内（近 7 天 / 近 30 天）的仓库，按 star 总数降序。
+         *     「本周涨了多少星」官方 API 拿不到（见 github_ranking 模块 docstring），
+         *     所以这里是「新星榜」而不是「涨星榜」，页面上也照此措辞。
+         *
+         *     ## 四级降级链（每一级都要能在界面上说清楚）
+         *     1. **Redis 新鲜缓存**（30 分钟）→ `source=cache`
+         *     2. **GitHub Search API 实时抓**（只 1 次请求）→ `source=github`，同时写新鲜 + 过期两份
+         *     3. **过期缓存**（6 小时）→ `source=stale`、`stale=true`，并给出「可能已过期」
+         *     4. **本机知识库快照**（按星数排已解读过的仓库）→ `source=knowledge_base`
+         *     5. 全都没有 → `source=unavailable` + 空列表
+         *
+         *     【为什么不做 sample 兜底】资讯卡片可以用内置示例撑场面，但榜单是**关于世界的
+         *     事实陈述**（「这周 star 最多的项目是 X」）。编造一份看起来很像的榜单，
+         *     比坦率地说「暂时拿不到」坏得多 —— 用户会照着假榜去学一个不存在的项目。
+         *
+         *     【为什么语言必须是白名单】`language` 直接进缓存键，允许任意值等于给了
+         *     一个「让缓存永不命中」的开关，几分钟就能把 GitHub Search API 的配额打空。
+         */
+        get: operations["get_github_rankings_api_v1_discover_rankings_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/discover/search": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Search Repositories
+         * @description 按关键词搜 GitHub 仓库（只读，零 LLM 成本）
+         *
+         *     ## 与榜单的分工
+         *     榜单回答「最近什么最火」（预置窗口 + 排序），搜索回答「我要找什么样的仓库」。
+         *     后者是榜单覆盖不到的长尾需求，也是这个项目「仓库查询」定位的主入口。
+         *
+         *     ## 降级链（每一级都要能在界面上说清楚）
+         *     1. **Redis 新鲜缓存**（15 分钟）→ `source=cache`
+         *     2. **GitHub Search API 实时检索**（1 次请求）→ `source=github`
+         *     3. **过期缓存**（1 小时）→ `source=stale`，提示可能已过期
+         *     4. **本机知识库里真的命中关键词**的仓库 → `source=knowledge_base`
+         *     5. 全都没有 → `source=unavailable` + 空列表
+         *
+         *     【为什么兜底不能复用榜单那套】榜单问「最火的是什么」，本地按星数排是合理近似；
+         *     搜索问「和这个词相关的是什么」，把全库按星排一遍当结果，等于用语义不同的
+         *     答案冒充用户的答案。所以这里只返回文案里真的命中词的仓库，宁可为空。
+         *
+         *     【为什么配额比榜单紧】榜单只有 24 个缓存键，搜索的键由用户输入决定，
+         *     「换个词就穿透缓存」是这里独有的放大面 —— 而 GitHub Search API 未认证
+         *     只有 10 次/分钟，两个脚本就能把全站搜索打到降级。
+         */
+        get: operations["search_repositories_api_v1_discover_search_get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -229,6 +347,11 @@ export interface paths {
          *     - 生成不了时返回 `origin=unavailable` 并带 `reason` 与 fallback_description，
          *       由前端优雅降级，绝不阻塞「先读原文」这条主链路
          *     - 仍保留 IP 限流：登录用户也可能被脚本驱动着反复打这个接口
+         *
+         *     【开关关闭时为什么返回 unavailable 而不是 503】导读是「先读原文」页的辅助
+         *     内容，原文本身（/content）不受开关影响。返回 503 会让整页报错；返回
+         *     `origin=unavailable / reason=feature_disabled` 则让前端照常展示原文，
+         *     只在导读区给一句「管理员已关闭」。开关的本意是**省钱**，不是把页面打坏。
          */
         get: operations["get_card_digest_api_v1_discover_cards__card_id__digest_get"];
         put?: never;
@@ -598,6 +721,10 @@ export interface paths {
         /**
          * Send Push Notification
          * @description 发送推送通知（基于真实会话上下文）
+         *
+         *     【功能开关】`push_notification` 会生成讲解，属于 `learning_chat` 模块。
+         *     模块关闭时整个「讲解 → 对话 → 追问」链路一起停，而不是只停其中几个接口：
+         *     半开半关会让用户点完「开始讲解」才在下一步撞墙，比直接说明更难理解。
          */
         post: operations["send_push_notification_api_v1_learning_push_post"];
         delete?: never;
@@ -632,6 +759,20 @@ export interface paths {
          *
          *     匿名不可用（`CurrentUser` 依赖）+ IP 限流：每次调用都会真实触发一次 LLM 推理，
          *     是明确的外部成本放大面。
+         *
+         *     ## 检索增强（RAG）
+         *     在拼提示词之前会先做一次块级检索（`modules/rag/chat_context.py`），命中的块
+         *     以【参考资料】的形式注入，并在响应 `sources.references` 里给出**块级**引用。
+         *     三道闸门保证它「只会加分、不会减分」：请求预算 → `QDRANT_READ` 熔断 → 相似度阈值。
+         *     **任何一环失败都只是不注入**，问答照常返回，接口不会因为向量库挂掉而 5xx。
+         *
+         *     引用只到**块**、不到**句子**：句子级溯源要模型逐句输出编号再回校验，代价是
+         *     多一轮解析且不可靠（模型会编编号）。给块级引用是诚实的。
+         *
+         *     【功能开关】`learning_chat` 关闭时 503，而不是退回 `_generate_fallback_response`
+         *     的固定话术：那段 fallback 的直接使用者是「LLM 不可用时的降级」，它给出的答案
+         *     与用户的问题无关，作为「管理员主动关闭」的表现只会让人以为系统坏了。
+         *     关闭就要明确说「已关闭」。
          */
         post: operations["chat_with_ai_api_v1_learning_chat_post"];
         delete?: never;
@@ -656,6 +797,9 @@ export interface paths {
          *     ## 请求体
          *     - session_id: 会话 ID
          *     - user_input: 用户输入
+         *
+         *     【功能开关】与 /push、/chat 共用 `learning_chat`：这一步会生成下一段讲解
+         *     与测验题，是整条链路里 LLM 调用最密集的一步。
          */
         post: operations["process_user_response_api_v1_learning_response_post"];
         delete?: never;
@@ -887,6 +1031,152 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/admin/features": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Feature Flags
+         * @description 列出全部功能开关。
+         *
+         *     即使某个开关从未被改过也会出现在列表里（值取自代码默认值）——
+         *     管理员需要看到「全貌」，而不是「只有被改过的那几个」。
+         */
+        get: operations["get_feature_flags_api_v1_admin_features_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/features/{key}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Update Feature Flag
+         * @description 开启 / 关闭一个功能模块。
+         *
+         *     `key` 必须是 `services/feature_flags.py` 里注册过的开关：允许写任意 key
+         *     等于给数据库开了一个可以无限堆积垃圾行的写入口，而管理页永远只会展示
+         *     已知的那几个。
+         */
+        patch: operations["update_feature_flag_api_v1_admin_features__key__patch"];
+        trace?: never;
+    };
+    "/api/v1/admin/users": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Users
+         * @description 用户列表（按注册时间倒序）。
+         *
+         *     只返回 id / 邮箱 / 用户名 / 角色 / 状态 —— 不含 password_hash、
+         *     注销令牌、IP 哈希等任何敏感列。后台是权限最大的界面，
+         *     泄露面必须最小。
+         */
+        get: operations["get_users_api_v1_admin_users_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/users/{user_id}/role": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Update User Role
+         * @description 调整某个用户的角色。
+         *
+         *     两道拒绝：
+         *     - 改自己：防止最后一个管理员把自己降权，从此再也进不了后台；
+         *     - 白名单账号：配置强制为 admin，改库无效，直接说明而不是假装成功。
+         */
+        patch: operations["update_user_role_api_v1_admin_users__user_id__role_patch"];
+        trace?: never;
+    };
+    "/api/v1/admin/whoami": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Whoami
+         * @description 当前管理员自述：前端据此确认「后台入口该不该显示」。
+         *
+         *     单独开一个端点而不是复用 /auth/me：`/auth/me` 匿名也能调（返回 401 由前端处理），
+         *     而这里能走到 body 就说明「角色校验已通过」，语义更明确。
+         */
+        get: operations["whoami_api_v1_admin_whoami_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/llm/usage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Llm Usage
+         * @description LLM 成本：用量、花费、用途/模型拆分与未来 7 天预测。
+         *
+         *     【为什么和功能开关放在同一个 router】它们服务同一个决策 ——「这台机器现在
+         *     该不该继续花钱」。开关是**止血的手**，成本面板是**判断该不该止血的眼睛**；
+         *     分到两个页面会让管理员在两个标签页之间来回对照。
+         *
+         *     【为什么预测放在后端】预测依赖明细行与价目表，前端拿不到原始 token；
+         *     更重要的是口径必须唯一：如果前端自己再算一遍「日均 × 30」，两个数字会打架，
+         *     而管理人只会相信更小的那个。
+         */
+        get: operations["get_llm_usage_api_v1_admin_llm_usage_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/": {
         parameters: {
             query?: never;
@@ -1043,6 +1333,51 @@ export interface components {
             count: number;
             /** Total */
             total: number;
+        };
+        /**
+         * AdminUserItem
+         * @description 后台用户列表里的一行（不暴露 password_hash 等敏感列）
+         */
+        AdminUserItem: {
+            /** Id */
+            id: string;
+            /** Email */
+            email: string;
+            /** Username */
+            username: string;
+            /**
+             * Role
+             * @description user | admin（已合并 ADMIN_EMAILS 白名单）
+             */
+            role: string;
+            /** Is Active */
+            is_active: boolean;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
+        /**
+         * AdminUserListResponse
+         * @description GET /admin/users 响应
+         */
+        AdminUserListResponse: {
+            /** Items */
+            items: components["schemas"]["AdminUserItem"][];
+            /** Count */
+            count: number;
+        };
+        /**
+         * AdminUserRoleUpdateRequest
+         * @description PATCH /admin/users/{user_id}/role 请求体
+         */
+        AdminUserRoleUpdateRequest: {
+            /**
+             * Role
+             * @description 目标角色：user | admin
+             */
+            role: string;
         };
         /**
          * AuthSessionItem
@@ -1367,8 +1702,53 @@ export interface components {
             sources: components["schemas"]["ChatSources"];
         };
         /**
+         * ChatSourceReference
+         * @description 回答依据的**一块**语料（块级引用，不是句子级）
+         *
+         *     只给到块级是刻意的：句子级溯源需要模型逐句输出引用编号、再由后端回校验，
+         *     代价是额外一轮解析且**不可靠**（模型会编出并不存在的编号）。块级引用是
+         *     诚实的 —— 用户能看到依据来自哪张卡哪一节，我们也不假装做了做不到的事。
+         */
+        ChatSourceReference: {
+            /**
+             * Ordinal
+             * @description 提示词里的编号，从 1 开始
+             */
+            ordinal: number;
+            /**
+             * Card Id
+             * @description 来源卡片 ID
+             */
+            card_id: string;
+            /**
+             * Title
+             * @default
+             */
+            title: string;
+            /**
+             * Source Url
+             * @default
+             */
+            source_url: string;
+            /**
+             * Score
+             * @description 向量相似度（仅排序参考，不是可信度）
+             * @default 0
+             */
+            score: number;
+            /**
+             * Heading Path
+             * @description 块在原文中的小节路径
+             */
+            heading_path?: string[];
+        };
+        /**
          * ChatSources
-         * @description 回答所依据的会话上下文
+         * @description 回答所依据的材料：会话上下文 +（有检索时）块级引用
+         *
+         *     `references` 为空表示**本轮没有注入任何资料** —— 可能因为检索总开关关闭、
+         *     没有块过阈值、或检索链路降级。前端据此可以区分「基于卡片作答」和
+         *     「基于知识库作答」。
          */
         ChatSources: {
             /**
@@ -1383,6 +1763,8 @@ export interface components {
             summary: string;
             /** Core Concepts */
             core_concepts?: string[];
+            /** References */
+            references?: components["schemas"]["ChatSourceReference"][];
         };
         /**
          * CompleteRequest
@@ -1408,6 +1790,103 @@ export interface components {
             /** Elapsed Minutes */
             elapsed_minutes: number;
             fsrs_update: components["schemas"]["FsrsUpdate"];
+        };
+        /**
+         * CostForecast
+         * @description 成本预测（最小二乘线性回归）
+         */
+        CostForecast: {
+            /**
+             * Method
+             * @description predict 方法标识，当前为 least_squares
+             */
+            method: string;
+            /**
+             * Samples
+             * @description 参与拟合的天数
+             */
+            samples: number;
+            /**
+             * Slope Cny Per Day
+             * @description 日成本的变化速度（元/天），正数为上升
+             */
+            slope_cny_per_day: number;
+            /**
+             * R2
+             * @description 拟合优度 0~1，越低说明趋势越不可信
+             */
+            r2: number;
+            /**
+             * Confidence
+             * @description high | medium | low | insufficient
+             */
+            confidence: string;
+            /**
+             * Next 7D Cny
+             * @description 未来 7 天预测花费（元）
+             */
+            next_7d_cny: number;
+            /**
+             * Daily Avg Cny
+             * @description 预测期内日均花费（元）
+             */
+            daily_avg_cny: number;
+            /**
+             * Daily Forecast
+             * @description 逐日预测值
+             */
+            daily_forecast?: number[];
+            /**
+             * Mtd Cny
+             * @description 本月至今已花（元）
+             * @default 0
+             */
+            mtd_cny: number;
+            /**
+             * Month Remaining Days
+             * @description 本月剩余天数（不含今天）
+             * @default 0
+             */
+            month_remaining_days: number;
+            /**
+             * Month Projection Cny
+             * @description 本月预测总额 = 已花 + 日均 × 剩余天数
+             * @default 0
+             */
+            month_projection_cny: number;
+            /**
+             * Budget Cny
+             * @description 月度预算；0 表示未设预算
+             * @default 0
+             */
+            budget_cny: number;
+            /**
+             * Budget Used Ratio
+             * @description 预算使用比例；未设预算时为 null
+             */
+            budget_used_ratio?: number | null;
+            /**
+             * Days Until Budget
+             * @description 按当前速度，预算还能撑多少天；未设预算或无花费时为 null
+             */
+            days_until_budget?: number | null;
+        };
+        /**
+         * DailyCostPoint
+         * @description 日成本曲线上的一个点（窗口内空缺日为 0，保证曲线连续）
+         */
+        DailyCostPoint: {
+            /**
+             * Date
+             * @description 本地日期 YYYY-MM-DD（UTC+8）
+             */
+            date: string;
+            /** Calls */
+            calls: number;
+            /** Tokens */
+            tokens: number;
+            /** Cost Cny */
+            cost_cny: number;
         };
         /**
          * DataExportResponse
@@ -1476,6 +1955,64 @@ export interface components {
              * @description 调试细节（生产环境可为空）
              */
             detail?: unknown | null;
+        };
+        /**
+         * FeatureFlagItem
+         * @description 一个功能开关的当前状态
+         */
+        FeatureFlagItem: {
+            /**
+             * Key
+             * @description 开关标识，如 learning_chat
+             */
+            key: string;
+            /**
+             * Enabled
+             * @description 当前是否开启（数据库值为准）
+             */
+            enabled: boolean;
+            /**
+             * Default Enabled
+             * @description 代码里的默认值（用于一键恢复）
+             */
+            default_enabled: boolean;
+            /**
+             * Description
+             * @description 这个开关控制什么
+             * @default
+             */
+            description: string;
+            /**
+             * Updated At
+             * @description 最近一次修改时间
+             */
+            updated_at?: string | null;
+            /**
+             * Updated By
+             * @description 最近一次修改人的用户 id
+             */
+            updated_by?: string | null;
+        };
+        /**
+         * FeatureFlagListResponse
+         * @description GET /admin/features 响应
+         */
+        FeatureFlagListResponse: {
+            /** Items */
+            items: components["schemas"]["FeatureFlagItem"][];
+            /** Count */
+            count: number;
+        };
+        /**
+         * FeatureFlagUpdateRequest
+         * @description PATCH /admin/features/{key} 请求体
+         */
+        FeatureFlagUpdateRequest: {
+            /**
+             * Enabled
+             * @description 目标状态：true 开启 / false 关闭
+             */
+            enabled: boolean;
         };
         /**
          * FsrsUpdate
@@ -1554,6 +2091,94 @@ export interface components {
             activities_total: number;
         };
         /**
+         * LlmCostTotals
+         * @description 所选窗口内的用量与花费总额
+         */
+        LlmCostTotals: {
+            /**
+             * Calls
+             * @description 窗口内调用次数（含失败）
+             */
+            calls: number;
+            /**
+             * Success Calls
+             * @description 成功次数
+             */
+            success_calls: number;
+            /** Prompt Tokens */
+            prompt_tokens: number;
+            /** Completion Tokens */
+            completion_tokens: number;
+            /** Total Tokens */
+            total_tokens: number;
+            /**
+             * Cost Cny
+             * @description 成功调用产生的费用合计（元）
+             */
+            cost_cny: number;
+            /**
+             * Avg Latency Ms
+             * @description 成功调用的平均耗时（毫秒）
+             * @default 0
+             */
+            avg_latency_ms: number;
+            /**
+             * Success Rate
+             * @description 成功率 0~1
+             * @default 0
+             */
+            success_rate: number;
+            /**
+             * Estimated Calls
+             * @description token 由字符估算（上游未返回 usage）的调用数
+             * @default 0
+             */
+            estimated_calls: number;
+        };
+        /**
+         * LlmUsageResponse
+         * @description GET /admin/llm/usage 响应：成本面板所需的全部数据
+         */
+        LlmUsageResponse: {
+            /** Window Days */
+            window_days: number;
+            /**
+             * Timezone
+             * @description 分桶时区，固定 Asia/Shanghai
+             */
+            timezone: string;
+            /**
+             * Generated At
+             * Format: date-time
+             */
+            generated_at: string;
+            /**
+             * Currency
+             * @description 金额单位，当前只有人民币
+             * @default CNY
+             */
+            currency: string;
+            totals: components["schemas"]["LlmCostTotals"];
+            /** Series */
+            series: components["schemas"]["DailyCostPoint"][];
+            /** By Purpose */
+            by_purpose: components["schemas"]["PurposeCostItem"][];
+            /** By Model */
+            by_model: components["schemas"]["ModelCostItem"][];
+            forecast: components["schemas"]["CostForecast"];
+            /**
+             * Notes
+             * @description 后端生成的结论句，直接展示
+             */
+            notes?: string[];
+            /**
+             * Price Table Note
+             * @description 计价口径说明（金额是写入时算的）
+             * @default
+             */
+            price_table_note: string;
+        };
+        /**
          * LoginRequest
          * @description POST /auth/login 请求体。
          *
@@ -1605,6 +2230,25 @@ export interface components {
         MeProfileResponse: {
             user: components["schemas"]["UserPublic"];
             stats: components["schemas"]["LearningStats"];
+        };
+        /**
+         * ModelCostItem
+         * @description 按模型拆分的成本
+         */
+        ModelCostItem: {
+            /** Model */
+            model: string;
+            /** Provider */
+            provider: string;
+            /** Calls */
+            calls: number;
+            /** Cost Cny */
+            cost_cny: number;
+            /**
+             * Price Known
+             * @description 是否命中本地价目表；false 表示金额为兜底价估算
+             */
+            price_known: boolean;
         };
         /**
          * PasswordChangeRequest
@@ -1804,6 +2448,37 @@ export interface components {
             card?: components["schemas"]["TechCard"] | null;
         };
         /**
+         * PurposeCostItem
+         * @description 按业务用途拆分的成本
+         */
+        PurposeCostItem: {
+            /** Purpose */
+            purpose: string;
+            /**
+             * Label
+             * @description 用途的中文名，可直接展示
+             */
+            label: string;
+            /** Calls */
+            calls: number;
+            /** Tokens */
+            tokens: number;
+            /** Cost Cny */
+            cost_cny: number;
+            /**
+             * Avg Cost Cny
+             * @description 单次平均花费，用于横向比较成本量级
+             * @default 0
+             */
+            avg_cost_cny: number;
+            /**
+             * Share
+             * @description 占窗口总花费的比例 0~1
+             * @default 0
+             */
+            share: number;
+        };
+        /**
          * PushRequest
          * @description POST /learning/push 请求体
          */
@@ -1873,50 +2548,156 @@ export interface components {
             review_data: components["schemas"]["ReviewData"];
         };
         /**
-         * RefreshResponse
-         * @description 抓取结果响应（各降级分支字段可选，故均给默认值）
+         * RankingItem
+         * @description 榜单一行
+         *
+         *     只有 `stars` 是 GitHub 的权威数字；`stars_per_day` 是本地派生的热度指标
+         *     （star 总数 / 仓库存活天数），用来区分「3 天 2000 星」和「7 天 2100 星」。
          */
-        RefreshResponse: {
+        RankingItem: {
+            /** Rank */
+            rank: number;
+            /** Repo Id */
+            repo_id: number;
             /**
-             * Status
-             * @description ok | partial | error | empty
+             * Full Name
+             * @description owner/repo
              */
-            status: string;
+            full_name: string;
+            /** Url */
+            url: string;
             /**
-             * New Count
+             * Description
+             * @description GitHub 上的原始简介（多为英文，未经 LLM 改写）
+             */
+            description?: string | null;
+            /**
+             * Summary Cn
+             * @description 已解读项目的中文摘要（来自知识库）；有值时前端优先展示它 —— 榜单里一半是英文原文、一半是中文摘要，读起来会很割裂
+             */
+            summary_cn?: string | null;
+            /**
+             * Stars
              * @default 0
              */
-            new_count: number;
+            stars: number;
             /**
-             * Skipped Count
+             * Forks
              * @default 0
              */
-            skipped_count: number;
+            forks: number;
+            /** Language */
+            language?: string | null;
             /**
-             * Failed Count
-             * @description 未入库的条数。>0 表示部分或全部新卡没能进知识库，前端必须如实提示
+             * Topics
+             * @default []
+             */
+            topics: string[];
+            /** Created At */
+            created_at?: string | null;
+            /** Pushed At */
+            pushed_at?: string | null;
+            /**
+             * Age Hours
+             * @description 仓库存活小时数，用于折算热度
+             */
+            age_hours?: number | null;
+            /**
+             * Stars Per Day
+             * @description 派生指标：star 总数 / 存活天数
+             */
+            stars_per_day?: number | null;
+            /**
+             * Card Id
+             * @description 与知识库卡片同构的 id（gh-<repo_id>）
+             */
+            card_id: string;
+            /**
+             * Has Explanation
+             * @description 该仓库是否已在知识库中（即已有中文摘要可读）
+             * @default false
+             */
+            has_explanation: boolean;
+        };
+        /**
+         * RankingLanguage
+         * @description 榜单语言筛选项（后端是唯一事实源，前端不自己维护列表）
+         */
+        RankingLanguage: {
+            /**
+             * Value
+             * @description 参数值，如 all / python / cpp
+             */
+            value: string;
+            /**
+             * Label
+             * @description 展示名，同时是 GitHub 的 language 检索值
+             */
+            label: string;
+        };
+        /**
+         * RankingResponse
+         * @description GET /discover/rankings 响应
+         *
+         *     口径（前端照抄展示）：窗口内**创建**的仓库，按 star 总数降序。
+         *     数据来源见 `source`：github 实时 / cache 缓存 / stale 过期缓存 /
+         *     knowledge_base 本机快照（非实时排名）/ unavailable 无数据。
+         */
+        RankingResponse: {
+            /**
+             * Window
+             * @description week | month
+             */
+            window: string;
+            /**
+             * Language
+             * @default all
+             */
+            language: string;
+            /**
+             * Window Start
+             * @description 统计起点（ISO 日期）
+             */
+            window_start?: string | null;
+            /**
+             * Items
+             * @default []
+             */
+            items: components["schemas"]["RankingItem"][];
+            /**
+             * Total
+             * @description 窗口内符合条件的仓库总数（GitHub total_count）
              * @default 0
              */
-            failed_count: number;
+            total: number;
             /**
-             * Total In Kb
-             * @default 0
+             * Query
+             * @description 实际下发的 GitHub 检索串，便于复现
              */
-            total_in_kb: number;
+            query?: string | null;
             /**
-             * Count
-             * @default 0
+             * Source
+             * @enum {string}
              */
-            count: number;
-            /** Message */
-            message?: string | null;
-            /** Fallback */
-            fallback?: string | null;
+            source: "github" | "cache" | "stale" | "knowledge_base" | "unavailable";
             /**
-             * Batch Id
-             * @description 本次采集批次号（collection_batches.id），用于内容溯源
+             * Stale
+             * @description 是否为过期数据（GitHub 不可达时的兜底）
+             * @default false
              */
-            batch_id?: string | null;
+            stale: boolean;
+            /** Fetched At */
+            fetched_at?: string | null;
+            /**
+             * Languages
+             * @default []
+             */
+            languages: components["schemas"]["RankingLanguage"][];
+            /**
+             * Note
+             * @description 口径说明或降级说明，前端原样展示
+             */
+            note?: string | null;
         };
         /**
          * RefreshTokenResponse
@@ -2020,6 +2801,96 @@ export interface components {
             new_interval: number;
             /** Next Review Date */
             next_review_date: string;
+        };
+        /**
+         * SearchFilters
+         * @description 本次搜索实际生效的筛选条件（回显，避免用户误以为筛选项没生效）
+         */
+        SearchFilters: {
+            /**
+             * Language
+             * @default all
+             */
+            language: string;
+            /**
+             * Min Stars
+             * @default 0
+             */
+            min_stars: number;
+            /**
+             * Sort
+             * @default stars
+             * @enum {string}
+             */
+            sort: "stars" | "updated";
+        };
+        /**
+         * SearchResponse
+         * @description GET /discover/search 响应
+         *
+         *     与 RankingResponse 的三点差异（都会影响前端文案，故写在这里）：
+         *
+         *     1. **总量不承诺准确**：GitHub 的 `total_count` 是估算值，搜索只取一页，
+         *        所以 `total` 只用于「约 N 个结果」这种措辞，不做分页。
+         *     2. **降级不能用全库快照**：榜单兜底可以「按星数排本地已收录仓库」，但搜索
+         *        的语义是「与这个词相关」，拿全库按星排就是答非所问。这里的 knowledge_base
+         *        兜底只返回**文案里真的命中关键词**的仓库，宁可为空。
+         *     3. **语法错误不降级**：查询串被 GitHub 拒绝（422）时直接报错让用户改词，
+         *        而不是端出一份缓存结果。
+         */
+        SearchResponse: {
+            /**
+             * Keyword
+             * @description 归一化后的检索词（回显）
+             */
+            keyword: string;
+            /**
+             * Github Query
+             * @description 实际下发的 GitHub 检索串，便于理解结果口径与复现
+             */
+            github_query?: string | null;
+            /**
+             * Items
+             * @default []
+             */
+            items: components["schemas"]["RankingItem"][];
+            /**
+             * Total
+             * @description GitHub 给出的结果总数（估算值，非分页承诺）
+             * @default 0
+             */
+            total: number;
+            /**
+             * @default {
+             *       "language": "all",
+             *       "min_stars": 0,
+             *       "sort": "stars"
+             *     }
+             */
+            filters: components["schemas"]["SearchFilters"];
+            /**
+             * Source
+             * @enum {string}
+             */
+            source: "github" | "cache" | "stale" | "knowledge_base" | "unavailable";
+            /**
+             * Stale
+             * @description 是否为过期数据（GitHub 不可达时的兜底）
+             * @default false
+             */
+            stale: boolean;
+            /** Fetched At */
+            fetched_at?: string | null;
+            /**
+             * Languages
+             * @default []
+             */
+            languages: components["schemas"]["RankingLanguage"][];
+            /**
+             * Note
+             * @description 口径说明或降级说明，前端原样展示
+             */
+            note?: string | null;
         };
         /**
          * ServiceInfoResponse
@@ -2236,6 +3107,126 @@ export interface components {
             count: number;
         };
         /**
+         * TaskAcceptedResponse
+         * @description 采集任务已受理（202）
+         *
+         *     `task_id` 同时是 `collection_batches.id`：前端只需记一个标识，进程重启后
+         *     这个 id 依然能查到批次终态。
+         */
+        TaskAcceptedResponse: {
+            /**
+             * Task Id
+             * @description 任务号，等于采集批次号
+             */
+            task_id: string;
+            /**
+             * Kind
+             * @description repo | article
+             */
+            kind: string;
+            /**
+             * Status
+             * @description 受理时恒为 running
+             * @default running
+             */
+            status: string;
+            /**
+             * Stage
+             * @description 当前阶段
+             * @default queued
+             */
+            stage: string;
+            /**
+             * Stage Label
+             * @description 阶段的中文文案
+             * @default 任务已提交…
+             */
+            stage_label: string;
+            /**
+             * Poll Url
+             * @description 查询进度的完整路径，前端无需自行拼接
+             */
+            poll_url: string;
+            /**
+             * Reused
+             * @description 是否复用了已有任务（并发触发时返回 409，此字段仅用于同步语义扩展）
+             * @default false
+             */
+            reused: boolean;
+        };
+        /**
+         * TaskProgressResponse
+         * @description 采集任务进度（轮询端每 0.8~1.5 秒拉一次）
+         *
+         *     进度是**服务端事实**：`stage` 由采集链路自行上报，`processed/total` 来自
+         *     真实的批次循环。进程重启导致内存进度丢失时，接口会用批次表回填终态，
+         *     并以 `progress_lost=true` 明确标注「过程不可得，结局可得」。
+         */
+        TaskProgressResponse: {
+            /** Task Id */
+            task_id: string;
+            /** Kind */
+            kind: string;
+            /**
+             * Status
+             * @description running | succeeded | partial | failed | empty
+             */
+            status: string;
+            /** Stage */
+            stage: string;
+            /** Stage Label */
+            stage_label: string;
+            /**
+             * Processed
+             * @default 0
+             */
+            processed: number;
+            /**
+             * Total
+             * @default 0
+             */
+            total: number;
+            /**
+             * Percent
+             * @default 0
+             */
+            percent: number;
+            /**
+             * New Count
+             * @default 0
+             */
+            new_count: number;
+            /**
+             * Skipped Count
+             * @default 0
+             */
+            skipped_count: number;
+            /**
+             * Failed Count
+             * @default 0
+             */
+            failed_count: number;
+            /** Message */
+            message?: string | null;
+            /** Error */
+            error?: string | null;
+            /**
+             * Elapsed Ms
+             * @default 0
+             */
+            elapsed_ms: number;
+            /** Started At */
+            started_at?: string | null;
+            /** Finished At */
+            finished_at?: string | null;
+            /**
+             * Progress Lost
+             * @description true 表示内存进度已随进程重启丢失，数据来自批次表终态
+             * @default false
+             */
+            progress_lost: boolean;
+        };
+        /**
          * TechCard
          * @description 统一技术卡片（仓库卡 / 文章卡共用）
          */
@@ -2361,6 +3352,11 @@ export interface components {
             is_active: boolean;
             /** Email Verified */
             email_verified: boolean;
+            /**
+             * Role
+             * @default user
+             */
+            role: string;
             /**
              * Created At
              * Format: date-time
@@ -2493,12 +3489,12 @@ export interface operations {
         requestBody?: never;
         responses: {
             /** @description Successful Response */
-            200: {
+            202: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["RefreshResponse"];
+                    "application/json": components["schemas"]["TaskAcceptedResponse"];
                 };
             };
             /** @description 业务错误（{code, message, detail}） */
@@ -2701,12 +3697,333 @@ export interface operations {
         requestBody?: never;
         responses: {
             /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaskAcceptedResponse"];
+                };
+            };
+            /** @description 业务错误（{code, message, detail}） */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 未登录 / 凭证无效或已过期 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 已登录但无权访问 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 状态冲突 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 请求过于频繁（限流，响应头带 Retry-After） */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 服务内部错误 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 上游依赖失败 */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_collect_task_api_v1_discover_tasks__task_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                task_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["RefreshResponse"];
+                    "application/json": components["schemas"]["TaskProgressResponse"];
+                };
+            };
+            /** @description 业务错误（{code, message, detail}） */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 未登录 / 凭证无效或已过期 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 已登录但无权访问 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 状态冲突 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 请求过于频繁（限流，响应头带 Retry-After） */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 服务内部错误 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 上游依赖失败 */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_github_rankings_api_v1_discover_rankings_get: {
+        parameters: {
+            query?: {
+                /** @description week | month */
+                window?: string;
+                /** @description 语言筛选，取值见响应里的 languages */
+                language?: string;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RankingResponse"];
+                };
+            };
+            /** @description 业务错误（{code, message, detail}） */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 未登录 / 凭证无效或已过期 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 已登录但无权访问 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 状态冲突 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 请求过于频繁（限流，响应头带 Retry-After） */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 服务内部错误 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 上游依赖失败 */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    search_repositories_api_v1_discover_search_get: {
+        parameters: {
+            query: {
+                /** @description 关键词；支持 GitHub 限定符，如 topic:llm、language:rust */
+                q: string;
+                /** @description 语言筛选，取值见响应里的 languages */
+                language?: string;
+                /** @description 最低 star 数 */
+                min_stars?: number;
+                /** @description stars | updated */
+                sort?: string;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SearchResponse"];
                 };
             };
             /** @description 业务错误（{code, message, detail}） */
@@ -6439,6 +7756,634 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["DataExportResponse"];
+                };
+            };
+            /** @description 业务错误（{code, message, detail}） */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 未登录 / 凭证无效或已过期 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 已登录但无权访问 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 状态冲突 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 请求过于频繁（限流，响应头带 Retry-After） */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 服务内部错误 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 上游依赖失败 */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_feature_flags_api_v1_admin_features_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FeatureFlagListResponse"];
+                };
+            };
+            /** @description 业务错误（{code, message, detail}） */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 未登录 / 凭证无效或已过期 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 已登录但无权访问 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 状态冲突 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 请求过于频繁（限流，响应头带 Retry-After） */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 服务内部错误 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 上游依赖失败 */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    update_feature_flag_api_v1_admin_features__key__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                key: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FeatureFlagUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FeatureFlagItem"];
+                };
+            };
+            /** @description 业务错误（{code, message, detail}） */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 未登录 / 凭证无效或已过期 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 已登录但无权访问 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 状态冲突 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 请求过于频繁（限流，响应头带 Retry-After） */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 服务内部错误 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 上游依赖失败 */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_users_api_v1_admin_users_get: {
+        parameters: {
+            query?: {
+                /** @description 返回条数上限 */
+                limit?: number;
+                /** @description 跳过条数 */
+                offset?: number;
+                /** @description 按邮箱或用户名模糊搜索 */
+                search?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminUserListResponse"];
+                };
+            };
+            /** @description 业务错误（{code, message, detail}） */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 未登录 / 凭证无效或已过期 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 已登录但无权访问 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 状态冲突 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 请求过于频繁（限流，响应头带 Retry-After） */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 服务内部错误 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 上游依赖失败 */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    update_user_role_api_v1_admin_users__user_id__role_patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                user_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AdminUserRoleUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminUserItem"];
+                };
+            };
+            /** @description 业务错误（{code, message, detail}） */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 未登录 / 凭证无效或已过期 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 已登录但无权访问 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 状态冲突 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 请求过于频繁（限流，响应头带 Retry-After） */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 服务内部错误 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 上游依赖失败 */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    whoami_api_v1_admin_whoami_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminUserItem"];
+                };
+            };
+            /** @description 业务错误（{code, message, detail}） */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 未登录 / 凭证无效或已过期 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 已登录但无权访问 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 状态冲突 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 请求过于频繁（限流，响应头带 Retry-After） */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 服务内部错误 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 上游依赖失败 */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_llm_usage_api_v1_admin_llm_usage_get: {
+        parameters: {
+            query?: {
+                /** @description 统计窗口天数（含今天） */
+                days?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LlmUsageResponse"];
                 };
             };
             /** @description 业务错误（{code, message, detail}） */

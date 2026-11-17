@@ -8,7 +8,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, String
+from sqlalchemy import Boolean, DateTime, String, text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.sql import expression
@@ -34,6 +34,15 @@ class User(Base):
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
     is_active: Mapped[bool] = mapped_column(
         Boolean, nullable=False, server_default=expression.true()
+    )
+    # 角色（阶段 6）：user | admin。取值集合与校验见 core/roles.py。
+    # 默认 user：注册入口绝不接受客户端指定角色 —— 否则任何人都能自封管理员。
+    # 提权只有两条路：ADMIN_EMAILS 配置白名单，或已登录管理员在后台改。
+    role: Mapped[str] = mapped_column(
+        String(16),
+        nullable=False,
+        default="user",
+        server_default=text("'user'"),
     )
     # 邮箱确认（阶段 5）：用户点击确认邮件里的链接后写入。
     # 注册不做阻塞式邮箱校验（用户若填错邮箱，仍能正常使用），因此这里允许为空，

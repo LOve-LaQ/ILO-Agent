@@ -12,6 +12,11 @@
 
 html {
   -webkit-font-smoothing: antialiased;
+  /* 横屏/WebView 里系统会自作主张放大字号，明确关掉，字号只由设计系统决定 */
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+  /* 移动端点按不要出现灰色高亮块，交给自己写的 :active 态 */
+  -webkit-tap-highlight-color: transparent;
 }
 
 body {
@@ -20,6 +25,17 @@ body {
   color: var(--text);
   font-size: 14px;
   line-height: 1.55;
+}
+
+/* 窄屏下输入框统一不小于 16px：低于 16px 时 iOS Safari 与多数内置 WebView 会在
+   聚焦瞬间强制放大整个页面，用户再退回列表就会看到错位的布局。
+   注意：各 feature 的 module.css 里输入类选择器权重更高，那里的 font-size 也要同步改。 */
+@media (max-width: 640px) {
+  input,
+  textarea,
+  select {
+    font-size: 16px;
+  }
 }
 
 a {
@@ -143,5 +159,84 @@ button {
 @keyframes spin {
   to {
     transform: rotate(360deg);
+  }
+}
+
+/* ============ 窄屏（手机 / 内置 WebView） ============ */
+/* 断点只设两处：640px 以下是手机，860px 以下是平板竖屏与小窗。
+   这里只做“全局性”的事，具体页面布局由各自 module.css 里的同名断点接管 */
+@media (max-width: 640px) {
+  .wrap {
+    padding: 0 14px;
+  }
+
+  body {
+    font-size: 13.5px;
+  }
+}
+
+/* ============ 触屏 ============ */
+/* 触屏没有真正的 hover：桌面端靠 hover 变色/抬升的效果在手机上会“点完停留”，
+   看起来像被选中了。这里把 hover 态还原成默认态，改用 :active 给按压反馈 */
+@media (hover: none) {
+  .icon-btn:hover {
+    background: none;
+    color: var(--text-2);
+  }
+
+  .mini-btn:hover {
+    border-color: var(--border);
+    color: var(--text-2);
+  }
+
+  .mini-btn.solid:hover {
+    background: var(--brand);
+    border-color: var(--brand);
+    color: #fff;
+  }
+
+  .tiny-btn:hover {
+    background: none;
+    color: var(--text-3);
+  }
+
+  .btn-primary:hover {
+    background: var(--brand);
+    box-shadow: none;
+  }
+
+  .icon-btn:active,
+  .tiny-btn:active {
+    background: var(--chip-bg);
+  }
+
+  .btn-primary:active {
+    background: var(--brand-strong);
+  }
+
+  .mini-btn:active {
+    border-color: var(--brand);
+    color: var(--brand);
+  }
+}
+
+/* 手指点按区域：图标按钮 32px、迷你按钮 24px 高都太窄，抬到约 40px。
+   只对粗指针生效，桌面端布局完全不受影响 */
+@media (pointer: coarse) {
+  .icon-btn {
+    width: 38px;
+    height: 38px;
+  }
+
+  .btn {
+    padding: 9px 16px;
+  }
+
+  .mini-btn {
+    padding: 9px 12px;
+  }
+
+  .tiny-btn {
+    padding: 9px;
   }
 }

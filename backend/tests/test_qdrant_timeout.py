@@ -361,12 +361,16 @@ def test_empty_fetch_still_reports_empty(monkeypatch):
     assert captured["status"] == "succeeded"
 
 
-def test_refresh_response_exposes_failed_count():
-    """前端要如实提示失败条数，这个字段是契约的一部分"""
-    from src.schemas.discover import RefreshResponse
+def test_task_progress_exposes_failed_count():
+    """前端要如实提示失败条数，这个字段是契约的一部分
 
-    fields = RefreshResponse.model_fields
+    异步化之后，单次抓取的计数挂在 `TaskProgressResponse` 上（原
+    `RefreshResponse` 已被它取代 —— 两个 refresh 接口都改成立即返回 202）。
+    """
+    from src.schemas.discover import TaskProgressResponse
+
+    fields = TaskProgressResponse.model_fields
     assert "failed_count" in fields, "缺少 failed_count，前端无法知道有多少条没入库"
     description = fields["status"].description or ""
-    for token in ("ok", "partial", "error", "empty"):
+    for token in ("succeeded", "partial", "failed", "empty"):
         assert token in description, f"status 的取值说明缺少 {token}"

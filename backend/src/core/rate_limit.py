@@ -44,6 +44,12 @@ _RULES: dict[str, tuple[str, int]] = {
     "discover:digest:ip": ("card_digest_rate_limit_per_hour", 3600),
     # 首屏资讯：登录用户会做一次全量候选排序（扫全库向量），不给额度就能被脚本刷
     "discover:news:ip": ("news_rate_limit_per_hour", 3600),
+    # 榜单：缓存命中时是纯读，穿透时要打 GitHub Search API（30 次/分钟），
+    # 不给配额就能被脚本刷成「全站榜单一起降级」
+    "discover:ranking:ip": ("ranking_rate_limit_per_hour", 3600),
+    # 搜索：缓存键由用户输入决定（不像榜单只有 24 个），是唯一能被「换个词就穿透」
+    # 的端点，因此配额要更紧 —— 否则把它当免费 GitHub 代理用，配额几分钟就没了
+    "discover:search:ip": ("search_rate_limit_per_hour", 3600),
     "password:reset:ip": ("password_reset_rate_limit_per_hour", 3600),
     "learning:chat:ip": ("learning_chat_rate_limit_per_hour", 3600),
     "account:cancel:ip": ("account_cancel_rate_limit_per_hour", 3600),
@@ -149,6 +155,8 @@ DISCOVER_REFRESH_IP = RateLimitRule("discover:refresh:ip")
 CARD_CONTENT_IP = RateLimitRule("discover:content:ip")
 CARD_DIGEST_IP = RateLimitRule("discover:digest:ip")
 NEWS_IP = RateLimitRule("discover:news:ip")
+RANKING_IP = RateLimitRule("discover:ranking:ip")
+SEARCH_IP = RateLimitRule("discover:search:ip")
 PASSWORD_RESET_IP = RateLimitRule("password:reset:ip")
 LEARNING_CHAT_IP = RateLimitRule("learning:chat:ip")
 ACCOUNT_CANCEL_IP = RateLimitRule("account:cancel:ip")
@@ -168,8 +176,10 @@ __all__ = [
     "LOGIN_IP",
     "NEWS_IP",
     "PASSWORD_RESET_IP",
+    "RANKING_IP",
     "REGISTER_IP",
     "REFRESH_IP",
+    "SEARCH_IP",
     "RateLimitRule",
     "enforce",
     "hit",

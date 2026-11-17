@@ -8,8 +8,12 @@ ILO-Agent Demo - FastAPI 主入口
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from starlette.exceptions import HTTPException as StarletteHTTPException
 from loguru import logger
+from contextlib import asynccontextmanager
 from pathlib import Path
+import asyncio
 import sys
 
 # 添加项目根目录（backend/）到 Python 路径。
@@ -17,10 +21,11 @@ import sys
 # 加载成两个模块——否则 ILOException 等对象身份不一致，全局异常处理器会失配。
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from src.core.config import settings, setup_logger
+from src.core.config import BACKEND_ROOT, settings, setup_logger
 from src.core.errors import register_exception_handlers
 from src.schemas.common import HealthCheckResponse, ServiceInfoResponse
 from src.api.middleware import DeadlineMiddleware, RequestContextMiddleware
+from src.api.routes.admin import router as admin_router
 from src.api.routes.auth import router as auth_router
 from src.api.routes.discover import router as discover_router
 from src.api.routes.learning import router as learning_router
@@ -45,6 +50,53 @@ def _cors_origins() -> list[str]:
         return [origin.strip() for origin in raw.split(",") if origin.strip()]
     fallback = (settings.frontend_base_url or "").strip().rstrip("/")
     return [fallback] if fallback else []
+
+
+class SPAStaticFiles(StaticFiles):
+    """前端静态托管 + SPA history 回退。
+
+    两条路径不能被「回退到 index.html」吞掉，否则故障现场会极具误导性：
+
+    - `api/` 开头的路径：不存在就必须 404（走全局错误契约）。若回退成 index.html，
+      客户端拿到的是 200 + HTML，错误信息离真正的故障点十万八千里。
+    - 带扩展名的资源（如 `assets/index-abc.js`）：文件不在就应当 404。回退 HTML 会让
+      浏览器把 HTML 当 JS 解析，控制台报 `Unexpected token '<'`，排查成本极高。
+    其余路径（`/learn/xxx` 这种前端路由）一律交给 index.html。
+    """
+
+    async def get_response(self, path: str, scope):
+        # 归一化两个平台差异后再判断：mount 在 "/" 上时 path 可能带前导斜杠，
+        # 且 Windows 下 Starlette 给的是 `api\v1\x` 这种反斜杠形式 ——
+        # 直接用 `startswith("api/")` 判断会静默失配，API 的 404 被吞成 200 + HTML。
+        clean = path.replace("\\", "/").strip("/")
+        if clean == "api" or clean.startswith("api/"):
+            raise StarletteHTTPException(status_code=404)
+        try:
+            return await super().get_response(path, scope)
+        except StarletteHTTPException as exc:
+            if exc.status_code != 404 or Path(clean).suffix:
+                raise
+            return await super().get_response("index.html", scope)
+
+
+def _resolve_frontend_dist() -> Path | None:
+    """定位前端构建产物；未开启托管或未构建时返回 None。
+
+    路径基准固定为 `BACKEND_ROOT` 而非当前工作目录：`start_dev.py` 从项目根拉起，
+    uvicorn 子进程 cwd 又在 `backend/`，用相对路径会指到两个不同目录。
+    """
+    if not settings.serve_frontend:
+        return None
+
+    raw = (settings.frontend_dist or "").strip()
+    dist = Path(raw) if raw else BACKEND_ROOT.parent / "frontend" / "dist"
+    if not (dist / "index.html").is_file():
+        logger.warning(
+            f"[WARN] SERVE_FRONTEND 已开启但找不到构建产物（{dist / 'index.html'}），"
+            "本次仅提供 API；请先执行 cd frontend && npm run build"
+        )
+        return None
+    return dist
 
 
 def _probe_dependencies() -> dict:
@@ -104,12 +156,38 @@ def create_application() -> FastAPI:
     # 「忘了配 = 没防护」的错配在启动时就挡下，而不是等第一次注册才暴露。
     assert_security_config()
 
+    @asynccontextmanager
+    async def lifespan(_: FastAPI):
+        """采集任务的生命周期收尾 + 重依赖预热
+
+        启动：把上一条进程留下的 running 批次标为 failed。进程被 kill（热重载、
+        崩溃、容器重启）时后台任务没有机会执行 finish_batch，批次会永远停在
+        running —— 运维看到一条「进行中」，实际那个任务早已不存在。
+        关闭：取消还在跑的任务，让它们尽快落终态，而不是等下一次启动再兜。
+        """
+        from src.services import task_runner, warmup
+        from src.services.collection_service import recover_orphan_batches
+
+        await asyncio.to_thread(recover_orphan_batches)
+        # 首页依赖在这里**同步**预热完（约 1s），而不是丢后台任务：
+        # 丢后台的话，首个用户的请求会和预热抢同一个模块导入锁，同一份工作做两遍，
+        # 实测把一次几十毫秒的请求拖到 4s。宁可启动晚 1s，也不要让用户等。
+        # 失败只降级（首个请求慢一点），因此这里不抛。
+        await warmup.run_feed_warmup()
+        # 更贵的 LLM 栈（langchain → transformers → torch，实测 12s）会跟首个页面
+        # 请求抢 GIL，改由首页把数据交给用户之后再预热 —— 见 services/warmup.py。
+        try:
+            yield
+        finally:
+            await task_runner.shutdown()
+
     app = FastAPI(
         title="ILO-Agent Demo",
         description="AI 技术情报官 · 智能技术资讯与学习 Agent",
         version="0.1.0",
         docs_url="/docs",
-        redoc_url="/redoc"
+        redoc_url="/redoc",
+        lifespan=lifespan,
     )
 
     # CORS 中间件：来源白名单（见 _cors_origins）。白名单为空时不注册该中间件 ——
@@ -141,20 +219,37 @@ def create_application() -> FastAPI:
     app.include_router(auth_router, prefix="/api/v1")
     app.include_router(learning_router, prefix="/api/v1")
     app.include_router(me_router, prefix="/api/v1")
+    # 管理后台：整个 router 由 require_admin 门禁保护（见 routes/admin.py）
+    app.include_router(admin_router, prefix="/api/v1")
 
     # 全局异常处理：统一错误契约 {code, message, detail}
     register_exception_handlers(app)
 
-    @app.get("/", response_model=ServiceInfoResponse)
-    async def root():
+    def _service_info() -> dict:
         return {
             "service": "ILO-Agent Demo",
             "version": "0.1.0",
             "status": "running",
             "docs": "/docs",
-            "health": "/health"
+            "health": "/health",
         }
-    
+
+    # 单端口同源模式下，`/` 属于前端页面，服务信息挪到 /api/v1/info，
+    # 否则打开域名看到一段 JSON —— 演示时第一印象就是「没部署好」。
+    frontend_dist = _resolve_frontend_dist()
+    if frontend_dist is None:
+        @app.get("/", response_model=ServiceInfoResponse)
+        async def root():
+            return _service_info()
+    else:
+        @app.get(
+            "/api/v1/info",
+            response_model=ServiceInfoResponse,
+            include_in_schema=False,
+        )
+        async def service_info():
+            return _service_info()
+
     @app.get("/health", response_model=HealthCheckResponse)
     def health_check():
         """健康检查接口（真实探测依赖，而不是硬编码 healthy）
@@ -170,7 +265,20 @@ def create_application() -> FastAPI:
             "service": "ILO-Agent Demo",
             "checks": checks,
         }
-    
+
+    # 兜底挂载必须放在所有路由注册之后：Starlette 按注册顺序匹配，
+    # mount("/") 一旦抢先就会把 /api、/docs、/health 全部当成静态路径。
+    if frontend_dist is not None:
+        app.mount(
+            "/",
+            SPAStaticFiles(directory=str(frontend_dist), html=True),
+            name="frontend",
+        )
+        logger.info(
+            f"[OK] 单端口同源模式：已托管前端 {frontend_dist}，"
+            "对外只需暴露 8000（服务信息见 /api/v1/info）"
+        )
+
     return app
 
 

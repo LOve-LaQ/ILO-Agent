@@ -30,6 +30,7 @@ from src.core.config import settings
 from src.core.errors import ERROR_RESPONSES, ILOException
 from src.core.net import client_ip, hash_ip, subject_fingerprint
 from src.core.password_policy import check_password
+from src.core.roles import DEFAULT_ROLE, ROLE_ADMIN, parse_emails
 from src.core.rate_limit import (
     ACCOUNT_CANCEL_IP,
     EMAIL_RESEND_IP,
@@ -272,6 +273,13 @@ def register(
         email=email,
         username=username,
         password_hash=hash_password(data.password),
+        # 角色只由服务端决定：命中 ADMIN_EMAILS 白名单即 admin，其余一律 user。
+        # 注册请求体里没有任何角色字段 —— 让客户端能指定角色等于让谁都能自封管理员。
+        role=(
+            ROLE_ADMIN
+            if email.strip().lower() in parse_emails(settings.admin_emails)
+            else DEFAULT_ROLE
+        ),
     )
     db.add(user)
     try:

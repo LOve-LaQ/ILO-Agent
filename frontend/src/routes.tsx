@@ -2,6 +2,8 @@ import { useState } from 'react';
 import { createBrowserRouter } from 'react-router-dom';
 
 import { AccountDeletePage } from './features/auth/components/AccountDeletePage';
+import { AdminPage } from './features/admin/AdminPage';
+import { useAuthStore } from './features/auth/store';
 import { AccountMenu } from './features/auth/components/AccountMenu';
 import { AccountSecurityPage } from './features/auth/components/AccountSecurityPage';
 import { ForgotPasswordPage } from './features/auth/components/ForgotPasswordPage';
@@ -55,9 +57,31 @@ function LibraryRoute() {
   );
 }
 
+/**
+ * 管理后台路由：登录态与角色由组合层判断后以 props 注入。
+ *
+ * 【为什么不在 AdminPage 里读 auth store】features 之间零交叉依赖：
+ * admin 不该 import auth。组合根已经依赖 auth，由它把 role 传下去最自然。
+ * 这里隐藏入口只是体验优化 —— 真正的边界在后端 require_admin（403）。
+ */
+function AdminRoute() {
+  const user = useAuthStore((state) => state.user);
+
+  return (
+    <RequireAuth>
+      <AdminPage
+        accountSlot={<AccountMenu />}
+        isAdmin={user?.role === 'admin'}
+        currentUserId={user?.id}
+      />
+    </RequireAuth>
+  );
+}
+
 export const router = createBrowserRouter([
   { path: '/', element: <DiscoveryPage accountSlot={<AccountMenu />} /> },
   { path: '/library', element: <LibraryRoute /> },
+  { path: '/admin', element: <AdminRoute /> },
   { path: '/login', element: <LoginPage /> },
   { path: '/register', element: <RegisterPage /> },
   { path: '/forgot-password', element: <ForgotPasswordPage /> },

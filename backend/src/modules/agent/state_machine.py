@@ -245,6 +245,10 @@ class ExplanationEngine:
             )
             return self._generate_fallback_explanation(topic, context)
 
+        # 记账包装器（惰性 import：本模块被 /learning/* 首次调用时才加载，
+        # 而 services 包会连带拉起源码服务层，放在模块顶层会让导入顺序变脆）
+        from src.services.llm_usage import tracked_invoke
+
         _started = time.monotonic()
         try:
             # 真实 LLM 模式
@@ -269,7 +273,17 @@ class ExplanationEngine:
             # 但底层 llm.invoke 是同步阻塞的 —— 直接裸调会独占事件循环，
             # 期间同 worker 上所有请求（含 /health）全部排队。
             # timeout 按次传入：客户端默认值只作兜底，本次可用时间由预算决定。
-            result = await asyncio.to_thread(llm.invoke, prompt, timeout=timeout)
+            #
+            # 【为什么换掉裸 invoke】`tracked_invoke` 内部做的是同一件事（同样卸载到
+            # 线程池、同样的 timeout、异常同样上抛），额外按「讲解」这一用途记一行
+            # 用量账。漏记这一条会让成本面板少了最贵的那条链路。
+            result = await tracked_invoke(
+                llm,
+                prompt,
+                purpose="explain",
+                user_id=context.get("user_id"),
+                timeout=timeout,
+            )
             circuit_breaker.record_success(circuit_breaker.LLM_CHAT)
             return result.content
 

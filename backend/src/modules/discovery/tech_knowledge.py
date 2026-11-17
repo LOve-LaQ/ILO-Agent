@@ -90,6 +90,10 @@ class TechKnowledgeBase:
             socket_connect_timeout=settings.redis_socket_timeout,
         )
         self._init_collection()
+        # 候选池缓存：key = f"{item_type}:{limit}"，value = (过期时间 monotonic, 池)
+        # 池里装的是 numpy 行归一化矩阵，写操作（upsert）会让它整体失效。
+        self._pool_cache: Dict[str, Any] = {}
+        self._pool_lock = threading.Lock()
 
     def _init_collection(self):
         names = [c.name for c in self.qdrant.get_collections().collections]
@@ -185,6 +189,16 @@ class TechKnowledgeBase:
             # 请求发不出去。详见该助手的 docstring。
             timeout=qdrant_timeout_seconds(settings.qdrant_write_timeout),
         )
+        # 新卡片进库 → 候选池的成员集合变了，必须整池作废。
+        # 不是「往池里追加一行」：矩阵与 payloads 靠下标一一对应，追加时若中间
+        # 任何一步失败，就会出现「A 的向量配 B 的卡片」—— 这是静默的错推荐，
+        # 比多付一次 scroll 严重得多。
+        self.invalidate_candidate_pool()
+
+    def invalidate_candidate_pool(self) -> None:
+        """让候选池缓存失效（写操作后调用）"""
+        with self._pool_lock:
+            self._pool_cache.clear()
 
     # ==================== 读取 ====================
 
@@ -288,6 +302,87 @@ class TechKnowledgeBase:
                 }
             )
         return candidates
+
+    # ==================== 候选池（个性化排序的快速通道） ====================
+
+    def _build_pool(self, candidates: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+        """把 `candidate_points` 的原始结果压成「payload 列表 + 行归一化矩阵」
+
+        为什么值得在进程里留一份：这一步把 500×1536 个 float 从 Python 对象搬进
+        连续内存（一次性 ~6MB），换来的是后续每次排序只需一次矩阵乘（~1ms），
+        而不是每请求都重新 scroll + 装箱。代价是缓存必须能在数据变化时明确失效。
+        """
+        try:
+            import numpy as np
+
+            # 延迟导入：tech_knowledge 被 services/collection_service 依赖，
+            # 模块级 import services.recommend 会绕回 services 包形成环。
+            from src.services.recommend import DEGENERATE_STD
+        except Exception as exc:  # noqa: BLE001 - 没有 numpy 就退回逐条排序
+            logger.info(f"[INFO] 候选池跳过快通道（numpy 不可用）: {exc}")
+            return None
+
+        payloads: List[Dict[str, Any]] = []
+        rows = []
+        dropped = 0
+        for candidate in candidates:
+            vector = candidate.get("vector")
+            if not vector or len(vector) != VECTOR_SIZE:
+                dropped += 1
+                continue
+            payloads.append(candidate.get("payload") or {})
+            rows.append(vector)
+        if not rows:
+            return None
+
+        matrix = np.asarray(rows, dtype=np.float64)
+        finite = np.isfinite(matrix).all(axis=1)
+        norms = np.linalg.norm(matrix, axis=1)
+        stds = matrix.std(axis=1)
+        # 与 recommend.is_degenerate_vector 同一标准：常量向量（降级写入的 [0.1]*1536）
+        # 与任何向量的余弦都相同，留着只会往排序结果里掺噪声
+        keep = finite & (norms > 1e-9) & (stds >= DEGENERATE_STD)
+        dropped += int((~keep).sum())
+        if not keep.any():
+            return None
+
+        matrix = matrix[keep] / norms[keep][:, None]
+        return {
+            "payloads": [p for p, alive in zip(payloads, keep) if alive],
+            "matrix": matrix,
+            "dropped": dropped,
+            "built_at": time.time(),
+        }
+
+    def candidate_pool(
+        self, item_type: str = None, limit: int = 500
+    ) -> Optional[Dict[str, Any]]:
+        """候选池（带进程内缓存）：`{"payloads", "matrix", "dropped", "built_at"}`
+
+        TTL 由 `settings.candidate_pool_ttl_seconds` 控制（<=0 表示不缓存）。
+        缓存的意义是**把 Qdrant 带向量 scroll 摊到多次请求上**：一次 scroll 要拉
+        500 条 × 1536 维向量，本机实测 ~450ms，而首页只取 3 张卡。
+
+        一致性策略：写路径（`upsert`）调用 `invalidate_candidate_pool()` 整池作废，
+        TTL 只是「万一有人绕过 upsert 直接写库」的保险。因此正常采集链路下，
+        数据变化即时可见，不必等 TTL 过期。
+        """
+        key = f"{item_type or '*'}:{limit}"
+        ttl = settings.candidate_pool_ttl_seconds
+        now = time.monotonic()
+
+        if ttl > 0:
+            with self._pool_lock:
+                entry = self._pool_cache.get(key)
+                if entry and entry[0] > now:
+                    return entry[1]
+
+        pool = self._build_pool(self.candidate_points(item_type=item_type, limit=limit))
+
+        if ttl > 0 and pool is not None:
+            with self._pool_lock:
+                self._pool_cache[key] = (time.monotonic() + ttl, pool)
+        return pool
 
     def list_by_category(self, category: str, n: int = 50) -> List[Dict[str, Any]]:
         """按分类标签查询卡片（用于「技术百科」板块）"""

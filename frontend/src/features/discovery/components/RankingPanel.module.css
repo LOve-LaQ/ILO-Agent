@@ -1,0 +1,453 @@
+/* 榜单面板：信息密度型排版（排名 + 数字），与卡片网格的「浏览型」排版形成对比 */
+
+.panel {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-card);
+  padding: 18px 18px 10px;
+  margin-top: 18px;
+}
+
+/* ============ 头部 ============ */
+.head {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.headText {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.title {
+  font-size: 17px;
+  font-weight: 700;
+  letter-spacing: 0.2px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.trophy {
+  font-size: 16px;
+}
+
+.meta {
+  color: var(--text-3);
+  font-size: 12.5px;
+  margin-top: 3px;
+}
+
+.headActions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+}
+
+/* 与顶栏分段切换同一套视觉语言：这是「同一类控件」，不该长得不一样 */
+.seg {
+  display: flex;
+  background: var(--chip-bg);
+  border-radius: 10px;
+  padding: 3px;
+  gap: 2px;
+}
+
+.segBtn {
+  padding: 5px 14px;
+  border-radius: 8px;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--text-2);
+  white-space: nowrap;
+}
+
+.segOn {
+  background: #fff;
+  color: var(--text);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
+}
+
+/* ============ 语言标签 ============ */
+.chips {
+  display: flex;
+  gap: 6px;
+  margin: 14px 0 4px;
+  overflow-x: auto;
+  /* 窄屏 8 个标签一定放不下：横滑而不是换行，换行会把榜单内容推到第二屏 */
+  scrollbar-width: none;
+  padding-bottom: 2px;
+}
+
+.chips::-webkit-scrollbar {
+  display: none;
+}
+
+.chip {
+  flex: none;
+  padding: 4px 11px;
+  border-radius: 99px;
+  font-size: 12px;
+  color: var(--text-2);
+  background: var(--chip-bg);
+  border: 1px solid transparent;
+  transition: all 0.14s;
+  white-space: nowrap;
+}
+
+.chip:hover {
+  color: var(--text);
+  border-color: var(--border-strong);
+}
+
+.chipOn {
+  background: var(--brand-weak);
+  color: var(--brand);
+  border-color: #d9d9f5;
+  font-weight: 600;
+}
+
+/* ============ 提示条 ============ */
+.notice {
+  margin-top: 10px;
+  padding: 8px 11px;
+  border-radius: 10px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--text-2);
+  background: var(--chip-bg);
+}
+
+.noticeWarn {
+  color: #8a5a00;
+  background: #fdf6e3;
+  border: 1px solid #f2e3bc;
+}
+
+/* ============ 榜单列表 ============ */
+.list {
+  list-style: none;
+  margin-top: 8px;
+  transition: opacity 0.15s;
+}
+
+/* 切换窗口/语言时保留上一份数据（避免整页闪骨架），但必须明确「正在更新」：
+   否则用户点了「Rust」看到一片 TypeScript，会以为筛选坏了。
+   冷启动要打一次 GitHub（约 2 秒），这段时间的沉默比任何加载动画都更让人困惑。 */
+.listBusy {
+  opacity: 0.45;
+}
+
+.busy {
+  font-size: 11.5px;
+  color: var(--text-3);
+  white-space: nowrap;
+}
+
+.row {
+  position: relative;
+  display: grid;
+  grid-template-columns: 26px minmax(0, 1fr) auto;
+  /* 顶部对齐而不是居中：仓库名是第一视觉锚点，排名和星数应当与它同高，
+     居中会让「1」落在两行描述的正中间，看起来和标题没有关系 */
+  align-items: start;
+  gap: 12px;
+  padding: 11px 8px;
+  border-radius: 10px;
+  isolation: isolate;
+}
+
+.row + .row {
+  /* 分隔线用 border-top 而不是 gap：行高不等时 gap 会让分隔线看起来断续 */
+  border-top: 1px solid var(--border);
+}
+
+.row:hover {
+  background: #fafafb;
+}
+
+/* 星条：相对榜首的视觉刻度。做成**贴底细条**而不是整行色块 ——
+   色块会压住描述文字，看起来像「选中行」，20 行排下来整页都是横条噪声 */
+.bar {
+  position: absolute;
+  left: 8px;
+  bottom: 3px;
+  height: 3px;
+  border-radius: 2px;
+  background: linear-gradient(90deg, #9a9af0, #c9c9f4);
+  z-index: -1;
+  transition: width 0.3s ease;
+}
+
+.rank {
+  font-variant-numeric: tabular-nums;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-3);
+  text-align: center;
+  width: 26px;
+  height: 26px;
+  line-height: 26px;
+  border-radius: 8px;
+  margin-top: 1px;
+}
+
+.rank1 {
+  color: #7a5b00;
+  background: linear-gradient(135deg, #ffe9a8, #ffd35c);
+}
+
+.rank2 {
+  color: #4d4d55;
+  background: linear-gradient(135deg, #eef0f4, #d8dce4);
+}
+
+.rank3 {
+  color: #7a4a24;
+  background: linear-gradient(135deg, #fbe3d1, #f0c7a8);
+}
+
+.main {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+/* 仓库名 + 「已解读」标签同一行：不加这层 flex，窄屏上长仓库名会占满整行，
+   把标签挤到下一行行首，看起来像是描述的一部分 */
+.nameRow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.repo {
+  font-family: var(--mono);
+  font-size: 13.5px;
+  font-weight: 650;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+  flex: 0 1 auto;
+}
+
+.repo:hover {
+  color: var(--brand);
+}
+
+.explained {
+  flex: none;
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--brand);
+  background: var(--brand-weak);
+  border-radius: 6px;
+  padding: 1px 6px;
+  white-space: nowrap;
+}
+
+.desc {
+  font-size: 12.5px;
+  color: var(--text-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sub {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 11.5px;
+  color: var(--text-3);
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+.lang {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+}
+
+.lang i {
+  width: 8px;
+  height: 8px;
+  border-radius: 3px;
+  display: inline-block;
+}
+
+.numbers {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 1px;
+  flex: none;
+  min-width: 62px;
+  padding-top: 1px;
+}
+
+.stars {
+  font-variant-numeric: tabular-nums;
+  font-size: 14px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.stars i {
+  color: #f0b429;
+  font-style: normal;
+  font-size: 12px;
+}
+
+.rate {
+  font-variant-numeric: tabular-nums;
+  font-size: 11px;
+  color: var(--text-3);
+  white-space: nowrap;
+}
+
+/* ============ 骨架 / 错误 ============ */
+.skeletonRow {
+  display: grid;
+  grid-template-columns: 26px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 13px 8px;
+}
+
+.skeletonRank,
+.skeletonMain,
+.skeletonStars {
+  height: 12px;
+  border-radius: 6px;
+  background: linear-gradient(90deg, #f0f0f3, #f7f7f9, #f0f0f3);
+  background-size: 200% 100%;
+  animation: shimmer 1.3s infinite linear;
+}
+
+.skeletonRank {
+  width: 22px;
+}
+
+.skeletonStars {
+  width: 54px;
+}
+
+@keyframes shimmer {
+  from {
+    background-position: 200% 0;
+  }
+  to {
+    background-position: -200% 0;
+  }
+}
+
+.errorBox {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 34px 16px;
+  text-align: center;
+  color: var(--text-2);
+  font-size: 13px;
+}
+
+/* ============ 页脚 ============ */
+.foot {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  border-top: 1px solid var(--border);
+  margin-top: 6px;
+  padding: 9px 2px 4px;
+  font-size: 11.5px;
+  color: var(--text-3);
+}
+
+/* ============ 窄屏 ============ */
+@media (max-width: 720px) {
+  .panel {
+    padding: 14px 12px 8px;
+    border-radius: 12px;
+  }
+
+  .head {
+    gap: 10px;
+  }
+
+  .title {
+    font-size: 15.5px;
+  }
+
+  /* 窗口切换独占一行：和标题挤在一起会把「GitHub 新星榜」压成两行 */
+  .headActions {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .seg {
+    flex: 1;
+  }
+
+  .segBtn {
+    flex: 1;
+    text-align: center;
+  }
+
+  .row {
+    grid-template-columns: 22px minmax(0, 1fr) auto;
+    gap: 9px;
+    padding: 10px 4px;
+  }
+
+  .bar {
+    left: 4px;
+  }
+
+  .rank {
+    width: 22px;
+    height: 22px;
+    line-height: 22px;
+    font-size: 12px;
+  }
+
+  .repo {
+    font-size: 12.5px;
+  }
+
+  .desc {
+    font-size: 12px;
+    /* 手机上只给两行：描述再长也读不完，宁可让标题和星数留在首屏 */
+    white-space: normal;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+  }
+
+  .numbers {
+    min-width: 50px;
+  }
+
+  .stars {
+    font-size: 13px;
+  }
+
+  .foot {
+    flex-direction: column;
+    gap: 3px;
+  }
+}

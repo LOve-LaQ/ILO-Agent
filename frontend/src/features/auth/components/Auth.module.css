@@ -291,3 +291,34 @@
   color: var(--text-3);
 }
 
+/* ============ 手机 ============ */
+@media (max-width: 640px) {
+  /* 靠上而不是垂直居中：软键盘弹出时浏览器会把居中卡片顶出可视区 */
+  .page {
+    min-height: 100vh; /* 老 WebView 兜底 */
+    min-height: 100dvh;
+    align-items: start;
+    padding: 24px 14px calc(24px + env(safe-area-inset-bottom));
+  }
+
+  .card {
+    padding: 24px 18px 20px;
+  }
+
+  .title {
+    font-size: 19px;
+  }
+
+  /* 16px 是 iOS 不触发自动放大的临界值，别改小 */
+  .input {
+    font-size: 16px;
+    padding: 10px 12px;
+  }
+
+  /* 账号安全页的 key-value 行：窄屏允许换行，邮箱这类长文本不会顶穿卡片 */
+  .infoRow {
+    flex-wrap: wrap;
+    gap: 2px 12px;
+  }
+}
+

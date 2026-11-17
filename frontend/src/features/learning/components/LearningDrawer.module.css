@@ -214,6 +214,112 @@
   color: var(--text-3);
 }
 
+/* ============ README / 导读的 Markdown 正文 ============ */
+/* 抽屉里没有富文本样式时，浏览器默认会给 h1 2em、pre 不换行、table 撑宽，
+   在 390px 屏上直接变成一屏两三个字 + 横向滚动。这里统一收敛到移动端可读的尺寸 */
+.readBody :global(h1),
+.readBody :global(h2) {
+  font-size: 16px;
+  line-height: 1.45;
+  margin: 18px 0 8px;
+}
+
+.readBody :global(h3) {
+  font-size: 14.5px;
+  margin: 14px 0 6px;
+}
+
+.readBody :global(h1:first-child),
+.readBody :global(h2:first-child) {
+  margin-top: 0;
+}
+
+.readBody :global(p) {
+  margin: 8px 0;
+}
+
+.readBody :global(ul),
+.readBody :global(ol) {
+  margin: 8px 0;
+  padding-left: 20px;
+}
+
+.readBody :global(li) {
+  margin: 4px 0;
+}
+
+.readBody :global(a) {
+  color: var(--brand);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.readBody :global(img) {
+  max-width: 100%;
+  height: auto;
+  border-radius: 8px;
+}
+
+.readBody :global(code) {
+  font-family: var(--mono);
+  font-size: 12px;
+  background: var(--chip-bg);
+  border-radius: 5px;
+  padding: 1px 5px;
+  overflow-wrap: anywhere;
+}
+
+/* 代码块：自己横向滚动，而不是把整个抽屉撑宽 */
+.readBody :global(pre) {
+  max-width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 12px;
+  margin: 10px 0;
+  font-size: 12.5px;
+  line-height: 1.6;
+}
+
+.readBody :global(pre code) {
+  background: none;
+  padding: 0;
+  font-size: inherit;
+}
+
+/* 表格同理：块级 + 横向滚动，列多也不会顶穿容器 */
+.readBody :global(table) {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  border-collapse: collapse;
+  margin: 10px 0;
+  font-size: 12.5px;
+}
+
+.readBody :global(th),
+.readBody :global(td) {
+  border: 1px solid var(--border);
+  padding: 6px 8px;
+  text-align: left;
+}
+
+.readBody :global(blockquote) {
+  margin: 8px 0;
+  padding: 6px 12px;
+  border-left: 3px solid var(--border-strong);
+  color: var(--text-2);
+}
+
+.readBody :global(hr) {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 14px 0;
+}
+
 .readNote {
   margin-top: 16px;
   padding-top: 12px;
@@ -239,7 +345,58 @@
 }
 
 @media (max-width: 860px) {
+  /* 手机上抽屉就是整页：右侧 440px 的侧滑在 390px 屏上会只剩一条缝，
+     且输入框贴着屏幕边缘，键盘弹出后会被遮住 */
   .drawer {
     width: 100%;
+    height: 100vh; /* 老 WebView 兜底 */
+    height: 100dvh; /* 地址栏收起/展开时不跳动 */
+    animation: slide-up 0.2s ease;
+  }
+
+  @keyframes slide-up {
+    from {
+      transform: translateY(24px);
+      opacity: 0;
+    }
+    to {
+      transform: none;
+      opacity: 1;
+    }
+  }
+
+  .drawerHead {
+    padding: 12px 14px;
+    /* 刘海屏：内容下移，标题不被状态栏压住 */
+    padding-top: calc(12px + env(safe-area-inset-top));
+  }
+
+  .chatNav,
+  .sourceBar {
+    padding-left: 14px;
+    padding-right: 14px;
+  }
+
+  .chatBody,
+  .readBody {
+    padding: 14px;
+  }
+
+  /* 输入区贴底：留出 iPhone 底部横条的高度，否则发送按钮被手势区盖住 */
+  .drawerInput {
+    padding: 10px 12px calc(10px + env(safe-area-inset-bottom));
+  }
+
+  /* 16px 是 iOS 不自动放大的临界值，别改小 */
+  .drawerInput input {
+    font-size: 16px;
+    padding: 10px 12px;
+  }
+
+  .readActions,
+  .explainActions {
+    padding-left: 14px;
+    padding-right: 14px;
+    padding-bottom: calc(12px + env(safe-area-inset-bottom));
   }
 }

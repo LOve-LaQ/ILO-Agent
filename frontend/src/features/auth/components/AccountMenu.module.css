@@ -1,4 +1,17 @@
+.root {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
 .group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* 桌面端的平铺入口；窄屏整块隐藏，换成头像下拉 */
+.inline {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -13,18 +26,111 @@
   background: var(--chip-bg);
 }
 
-.user {
-  font-size: 13px;
-  font-weight: 500;
-  color: var(--text-2);
-  max-width: 140px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+/* 默认（桌面）不渲染触发按钮与浮层 */
+.trigger {
+  display: none;
 }
 
-@media (max-width: 640px) {
-  .user {
-    max-width: 76px;
+.sheet {
+  display: none;
+}
+
+/* 平铺形态需要约 300px 宽度，内容区在 1024 以下已放不下：
+   这一档一律收成头像下拉，避免 flex 把按钮压成「账号安 / 全」的竖排 */
+@media (max-width: 1024px) {
+  .inline {
+    display: none;
+  }
+
+  .placeholder {
+    width: 72px;
+  }
+
+  /* 单指可点的圆形头像按钮，比一排文字按钮省掉约 250px 宽度 */
+  .trigger {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    padding: 2px;
+  }
+
+  .avatar {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    display: grid;
+    place-items: center;
+    background: var(--brand-weak);
+    color: var(--brand);
+    font-size: 15px;
+  }
+
+  .caret {
+    font-size: 10px;
+    color: var(--text-3);
+  }
+
+  .sheet {
+    display: block;
+    position: absolute;
+    right: 0;
+    top: calc(100% + 10px);
+    z-index: 5;
+    min-width: 190px;
+    padding: 6px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    box-shadow: var(--shadow-pop);
+    animation: sheet-in 0.14s ease;
+  }
+
+  @keyframes sheet-in {
+    from {
+      opacity: 0;
+      transform: translateY(-4px);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+
+  .sheetUser {
+    display: grid;
+    gap: 2px;
+    padding: 8px 10px 10px;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 4px;
+  }
+
+  .sheetName {
+    font-size: 13px;
+    font-weight: 600;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .sheetMeta {
+    font-size: 11.5px;
+    color: var(--text-3);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .item {
+    display: block;
+    width: 100%;
+    text-align: left;
+    padding: 10px;
+    border-radius: 8px;
+    font-size: 13.5px;
+    color: var(--text);
+  }
+
+  .item:active {
+    background: var(--chip-bg);
   }
 }

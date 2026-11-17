@@ -6,6 +6,7 @@
     python backend/start_dev.py
 """
 
+import os
 import subprocess
 import sys
 import webbrowser
@@ -101,6 +102,26 @@ def check_postgres():
         return False
 
 
+def _read_env_flag(name: str) -> bool:
+    """读布尔开关：进程环境优先，其次 backend/.env。
+
+    必须两处都读：uvicorn 子进程靠 pydantic-settings 读 .env，而本脚本只是普通
+    Python 进程。若只认进程环境变量，把 SERVE_FRONTEND 写进 .env 的人会看到
+    「前端照旧起在 5173」的错位现象。
+    """
+    raw = (os.environ.get(name) or "").strip()
+    if not raw:
+        env_path = BACKEND_ROOT / ".env"
+        if env_path.is_file():
+            try:
+                from dotenv import dotenv_values
+
+                raw = (dotenv_values(env_path).get(name) or "").strip()
+            except Exception:  # noqa: BLE001 - 读不到就按关闭处理
+                raw = ""
+    return raw.lower() in {"1", "true", "yes", "on"}
+
+
 def start_frontend():
     """启动前端开发服务器（Vite）
 
@@ -171,12 +192,15 @@ def wait_for_api(port: int = 8000, timeout: float = 90.0) -> bool:
     return False
 
 
-def open_browser_when_ready(api_port: int = 8000, timeout: float = 90.0) -> None:
-    """等 API 真正就绪后再打开浏览器"""
+def open_browser_when_ready(
+    api_port: int = 8000, timeout: float = 90.0, url: str | None = None
+) -> None:
+    """等 API 真正就绪后再打开浏览器（单端口模式下打开的是 8000 本身）"""
+    target = url or FRONTEND_URL
 
     def worker() -> None:
         if wait_for_api(api_port, timeout):
-            webbrowser.open(FRONTEND_URL)
+            webbrowser.open(target)
         else:
             print(f"⚠️  API 在 {timeout:.0f}s 内未就绪，浏览器未自动打开")
 
@@ -208,16 +232,33 @@ def main():
 
 def start_api():
     """启动 API 服务器（前台运行，CTRL+C 停止）"""
-    print("\nStep 2: Starting API server...")
-    print("   → http://localhost:8000/docs")
+    # 单端口同源模式：后端托管 frontend/dist，不起 vite。
+    # 内网穿透演示就靠这个姿势 —— 只暴露 8000，Cookie 与 CORS 都不需要额外配置。
+    single_port = _read_env_flag("SERVE_FRONTEND")
+    frontend_dist = PROJECT_ROOT / "frontend" / "dist"
+
+    if single_port:
+        print("\nStep 2: Starting API server (单端口同源模式)...")
+        print("   → http://127.0.0.1:8000        (前端 + API 同源)")
+        print("   → http://127.0.0.1:8000/docs   (API 文档)")
+        if not (frontend_dist / "index.html").is_file():
+            print(f"\n⚠️  未找到 {frontend_dist / 'index.html'}")
+            print("   先构建：cd frontend && npm run build")
+            print("   否则只能访问 /docs 与 /api/v1，根路径不会有页面\n")
+    else:
+        print("\nStep 2: Starting API server...")
+        print("   → http://localhost:8000/docs")
     print("   (Press CTRL+C to stop)\n")
 
     # 先把前端拉起来（vite 不阻塞），再在当前进程前台跑 API：
     # CTRL+C 能直接停掉 API，也不会出现「API 还没就绪就开浏览器」的竞态
-    start_frontend()
-    open_browser_when_ready()
-
-    print("Step 3: Opening frontend (等 API 就绪后自动打开浏览器)...\n")
+    if single_port:
+        print("Step 3: 前端由后端托管，跳过 vite；API 就绪后自动打开浏览器...\n")
+        open_browser_when_ready(url="http://127.0.0.1:8000")
+    else:
+        start_frontend()
+        open_browser_when_ready()
+        print("Step 3: Opening frontend (等 API 就绪后自动打开浏览器)...\n")
 
     try:
         # 必须把 cwd 切到 backend：uvicorn 的 import 路径以 cwd 为基准，

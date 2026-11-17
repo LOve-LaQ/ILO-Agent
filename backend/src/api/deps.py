@@ -18,6 +18,8 @@ from sqlalchemy.orm import Session
 
 from src.core.db import get_db, get_optional_db
 from src.core.errors import ILOException
+from src.core.config import settings
+from src.core.roles import ROLE_ADMIN, effective_role
 from src.core.security import decode_token
 from src.models.user import User
 
@@ -102,8 +104,27 @@ def get_optional_user(
         return None
 
 
+def require_admin(user: Annotated[User, Depends(get_current_user)]) -> User:
+    """管理员门禁（阶段 6）。
+
+    【为什么用 403 而不是 404】后台路径本身就是公开的（`/api/v1/admin/*` 出现在
+    OpenAPI 里），把「无权」伪装成「不存在」没有意义；403 + 明确 code 才能让前端
+    准确显示「需要管理员权限」，而不是让用户以为链接失效了。
+
+    【为什么复用 get_current_user 而不是再解析一次 token】角色判断必须建立在
+    「已通过完整凭证校验」之上；单独解析 token 会绕过会话撤销黑名单与
+    is_active 检查，等于开了一条权限更高的旁路。
+    """
+    if effective_role(user, settings.admin_emails) != ROLE_ADMIN:
+        raise ILOException(
+            "ADMIN_REQUIRED", "该操作需要管理员权限。", status_code=403
+        )
+    return user
+
+
 # 路由签名直接用这些别名，避免每个函数重复写 Depends(...)
 CurrentUser = Annotated[User, Depends(get_current_user)]
 OptionalUser = Annotated[Optional[User], Depends(get_optional_user)]
+AdminUser = Annotated[User, Depends(require_admin)]
 DbSession = Annotated[Session, Depends(get_db)]
 OptionalDbSession = Annotated[Optional[Session], Depends(get_optional_db)]

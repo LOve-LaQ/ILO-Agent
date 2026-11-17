@@ -1,0 +1,449 @@
+/* 管理后台样式：沿用 tokens.css 的设计变量，与「我的」页保持同一语言 */
+
+.nav {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  background: rgba(247, 247, 248, 0.86);
+  backdrop-filter: blur(10px);
+  border-bottom: 1px solid var(--border);
+}
+
+.navInner {
+  height: 60px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  font-weight: 700;
+  font-size: 14.5px;
+  letter-spacing: 0.2px;
+}
+
+.brandMark {
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
+  display: grid;
+  place-items: center;
+  background: linear-gradient(135deg, #6d6df0, #4a4ab2);
+  color: #fff;
+  font-size: 13px;
+  box-shadow: 0 2px 6px rgba(91, 91, 214, 0.35);
+}
+
+.navRight {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.main {
+  padding-top: 22px;
+  padding-bottom: 64px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+/* ============ 区块 ============ */
+.section {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-card);
+  padding: 20px;
+}
+
+.sectionHead {
+  margin-bottom: 14px;
+}
+
+.sectionTitle {
+  margin: 0 0 6px;
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.sectionHint {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--text-2);
+}
+
+.placeholder {
+  padding: 18px 0;
+  font-size: 13px;
+  color: var(--text-3);
+}
+
+/* ============ 提示块 ============ */
+.notice {
+  border: 1px solid var(--danger-border);
+  background: var(--danger-weak);
+  border-radius: 10px;
+  padding: 14px 16px;
+}
+
+.noticeTitle {
+  font-size: 13.5px;
+  font-weight: 700;
+  color: var(--danger);
+  margin-bottom: 6px;
+}
+
+.noticeBody {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.7;
+  color: var(--text-2);
+}
+
+/* ============ 开关列表 ============ */
+.flagList {
+  display: flex;
+  flex-direction: column;
+}
+
+.flagRow {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 14px 0;
+  border-top: 1px solid var(--border);
+}
+
+.flagRow:first-child {
+  border-top: none;
+  padding-top: 4px;
+}
+
+.flagMain {
+  min-width: 0;
+  flex: 1;
+}
+
+.flagHead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.flagKey {
+  font-family: var(--mono);
+  font-size: 12.5px;
+  color: var(--brand-strong);
+  background: var(--brand-weak);
+  border-radius: 6px;
+  padding: 2px 7px;
+}
+
+.badge {
+  font-size: 11.5px;
+  border-radius: 999px;
+  padding: 1px 8px;
+  border: 1px solid transparent;
+}
+
+.badgeOn {
+  color: #1a7f4b;
+  background: #eaf6ef;
+  border-color: #cbe7d7;
+}
+
+.badgeOff {
+  color: var(--danger);
+  background: var(--danger-weak);
+  border-color: var(--danger-border);
+}
+
+.flagDesc {
+  margin: 0 0 4px;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--text);
+}
+
+.flagMeta {
+  margin: 0;
+  font-size: 11.5px;
+  color: var(--text-3);
+}
+
+/* ============ 开关控件 ============ */
+.switch {
+  flex: none;
+  width: 46px;
+  height: 26px;
+  border-radius: 999px;
+  border: 1px solid var(--border-strong);
+  background: #e4e4e8;
+  padding: 0;
+  cursor: pointer;
+  position: relative;
+  transition: background 0.16s ease, border-color 0.16s ease;
+}
+
+.switch:disabled {
+  opacity: 0.55;
+  cursor: progress;
+}
+
+.switchOn {
+  background: var(--brand);
+  border-color: var(--brand-strong);
+}
+
+.knob {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(24, 24, 27, 0.25);
+  transition: transform 0.16s ease;
+}
+
+.switchOn .knob {
+  transform: translateX(20px);
+}
+
+/* ============ 用户表 ============ */
+.searchRow {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.search {
+  flex: 1;
+  max-width: 320px;
+  height: 34px;
+  border: 1px solid var(--border-strong);
+  border-radius: 9px;
+  padding: 0 11px;
+  font-size: 13px;
+  background: var(--surface);
+  color: var(--text);
+}
+
+.search:focus {
+  outline: none;
+  border-color: var(--brand);
+  box-shadow: 0 0 0 3px var(--brand-weak);
+}
+
+.countText {
+  font-size: 12px;
+  color: var(--text-3);
+}
+
+.tableWrap {
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.table th,
+.table td {
+  text-align: left;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+
+.table th {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-2);
+  background: #fafafb;
+}
+
+.table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.mono {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--text-2);
+}
+
+.selfTag {
+  margin-left: 6px;
+  font-size: 11px;
+  color: var(--text-3);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 0 6px;
+}
+
+.roleSelect {
+  height: 30px;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  padding: 0 8px;
+  font-size: 12.5px;
+  background: var(--surface);
+  color: var(--text);
+}
+
+.roleSelect:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* 桌面上第一列就是普通单元格，「自己」标签跟在名字后 */
+.cellUser {
+  font-weight: 600;
+  color: var(--text);
+}
+
+/* ============ 手机 ============ */
+@media (max-width: 640px) {
+  .navInner {
+    height: 56px;
+    gap: 10px;
+  }
+
+  .brand {
+    font-size: 14px;
+  }
+
+  .main {
+    padding-top: 16px;
+    padding-bottom: calc(40px + env(safe-area-inset-bottom));
+    gap: 14px;
+  }
+
+  .section {
+    padding: 16px 14px;
+  }
+
+  /* 开关行：窄屏把 key 与状态徽章一起换行，避免描述被挤成一列窄字 */
+  .flagRow {
+    gap: 12px;
+    padding: 12px 0;
+  }
+
+  .flagHead {
+    flex-wrap: wrap;
+  }
+
+  .flagKey {
+    font-size: 11.5px;
+  }
+
+  .flagDesc {
+    font-size: 12.5px;
+  }
+
+  .searchRow {
+    flex-wrap: wrap;
+  }
+
+  /* 搜索框占满整行并抬高，避免和 iOS 自动放大打架 */
+  .search {
+    max-width: none;
+    height: 40px;
+    font-size: 16px;
+  }
+
+  /* 用户表：窄屏不再横向滚动，改为每行一张卡片。
+     5 列在 390px 下横向滚动等于让用户「猜右边还有内容」，而且邮箱这种长串
+     永远滚不全；改成卡片后信息是纵向阅读，无需任何横向手势。
+     data-label 由 AdminPage.tsx 写在 td 上，靠 ::before 渲染成字段名。 */
+  .tableWrap {
+    overflow: visible;
+    border: none;
+    border-radius: 0;
+  }
+
+  .table {
+    display: block;
+  }
+
+  .table thead {
+    display: none;
+  }
+
+  .table tbody {
+    display: block;
+  }
+
+  .table tr {
+    display: block;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: var(--surface);
+    padding: 2px 13px 4px;
+    margin-bottom: 10px;
+  }
+
+  .table tr:last-child {
+    margin-bottom: 0;
+  }
+
+  .table td {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 14px;
+    padding: 9px 0;
+    border-bottom: 1px solid var(--border);
+    white-space: normal;
+  }
+
+  .table td::before {
+    content: attr(data-label);
+    flex: none;
+    font-size: 12px;
+    color: var(--text-3);
+  }
+
+  /* 第一行当卡片标题：名字左对齐、不加字段名，和下面的字段行用线分隔 */
+  .table td.cellUser {
+    display: block;
+    padding: 11px 0 9px;
+    font-size: 14px;
+    font-weight: 650;
+  }
+
+  .table td.cellUser::before {
+    display: none;
+  }
+
+  /* 邮箱是长串无空格文本，允许断行，否则会把卡片顶宽 */
+  .table td.mono {
+    font-size: 12.5px;
+    text-align: right;
+    word-break: break-all;
+  }
+
+  .table tbody tr:last-child td,
+  .table td:last-child {
+    border-bottom: none;
+  }
+
+  .roleSelect {
+    height: 34px;
+    font-size: 13px;
+  }
+}

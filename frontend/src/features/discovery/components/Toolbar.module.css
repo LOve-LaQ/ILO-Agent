@@ -11,6 +11,15 @@
   letter-spacing: 0.1px;
 }
 
+.titles {
+  min-width: 0;
+}
+
+/* 桌面端操作在顶栏，这里不重复渲染 */
+.actions {
+  display: none;
+}
+
 .meta {
   color: var(--text-3);
   font-size: 12.5px;
@@ -41,4 +50,56 @@
   background: var(--brand);
   border-color: var(--brand);
   color: #fff;
+}
+
+/* ============ 窄屏 ============ */
+/* 断点必须与 NavBar 的 720 保持一致：顶栏在那一档隐藏了「换一批 / 抓取最新」，
+   这两颗按钮由这里接手。两边错开会出现一段「哪都没有抓取按钮」的空窗 */
+@media (max-width: 720px) {
+  .toolbar {
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 14px 0 8px;
+  }
+
+  .titles {
+    flex: 1;
+  }
+
+  /* 窄屏的「换一批 / 抓取最新」：与标题同一行，右侧对齐 */
+  .actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-left: auto;
+  }
+
+  .toolbar h1 {
+    font-size: 17.5px;
+  }
+
+  /* 说明文字在窄屏和右侧操作抢宽度，压到单行省略 —— 折两行时最后会剩两三个字的表情很难看 */
+  .meta {
+    font-size: 12px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  /* 时间胶囊横向滚动而不是换行：换行会把标题区撑成两行高 */
+  .pillRow {
+    margin-left: 0;
+    width: 100%;
+    overflow-x: auto;
+    scrollbar-width: none;
+    padding-bottom: 2px;
+  }
+
+  .pillRow::-webkit-scrollbar {
+    display: none;
+  }
+
+  .pill {
+    flex: none;
+  }
 }

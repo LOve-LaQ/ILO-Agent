@@ -17,6 +17,36 @@ export type CardType = TechCard['type'];
 /** 发现页视图 Tab（纯 UI 概念，与后端的 card.type 同形但不属契约） */
 export type CardTab = 'repo' | 'article';
 
+/**
+ * 首页的四个视图（含榜单与搜索）
+ *
+ * `ranking` / `search` 都不参与卡片请求：它们是另一套数据（GitHub Search API
+ * 的只读结果，零 LLM 成本、可长缓存），所以只能出现在视图层，绝不能混进
+ * `CardTab` —— 否则 `fetchCards('ranking')` 这种不安全调用在类型上就合法了。
+ */
+export type HomeView = CardTab | 'ranking' | 'search';
+
+/** 榜单窗口：近 7 天 / 近 30 天 */
+export type RankingWindow = 'week' | 'month';
+
+/** GET /discover/rankings 的响应：GitHub 新星榜 */
+export type RankingResponse = components['schemas']['RankingResponse'];
+
+/** 榜单一行 */
+export type RankingItem = components['schemas']['RankingItem'];
+
+/** GET /discover/search 的响应：按关键词检索仓库 */
+export type SearchResponse = components['schemas']['SearchResponse'];
+
+/** 搜索实际生效的筛选条件（后端回显） */
+export type SearchFilters = components['schemas']['SearchFilters'];
+
+/** 搜索排序：按星数 / 按最近更新 */
+export type SearchSort = SearchFilters['sort'];
+
+/** 榜单语言筛选项（后端是唯一事实源） */
+export type RankingLanguage = components['schemas']['RankingLanguage'];
+
 /** 受控分类词表，见 backend/src/modules/discovery/summary_spec.py 的 CATEGORIES */
 export type CategoryCode = TechCard['category'];
 
@@ -32,5 +62,8 @@ export type CardContentMeta = components['schemas']['CardContentMeta'];
 /** GET /discover/cards/{card_id}/digest 的响应：README 的中文导读（需登录） */
 export type CardDigestResponse = components['schemas']['CardDigestResponse'];
 
-/** POST /discover/refresh 与 POST /discover/refresh-articles 的响应 */
-export type RefreshResponse = components['schemas']['RefreshResponse'];
+/** POST /discover/refresh 与 POST /discover/refresh-articles 的响应（异步受理，202） */
+export type TaskAcceptedResponse = components['schemas']['TaskAcceptedResponse'];
+
+/** GET /discover/tasks/{task_id} 的响应：采集任务的真实进度 */
+export type TaskProgressResponse = components['schemas']['TaskProgressResponse'];

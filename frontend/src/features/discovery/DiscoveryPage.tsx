@@ -2,13 +2,15 @@ import { useCallback, useEffect, type ReactNode } from 'react';
 
 import { useToastStore } from '../../components/ui/toastStore';
 import { ApiError } from '../../shared/api/client';
-import type { TechCard } from '../../shared/types/card';
+import type { CardTab, TechCard } from '../../shared/types/card';
 import { LearningDrawer } from '../learning/components/LearningDrawer';
 import { useLearningSession } from '../learning/hooks/useLearningSession';
 import { CardGrid } from './components/CardGrid';
 import { EmptyState } from './components/EmptyState';
 import { ErrorState } from './components/ErrorState';
 import { NavBar } from './components/NavBar';
+import { RankingPanel } from './components/RankingPanel';
+import { SearchPanel } from './components/SearchPanel';
 import { RefreshOverlay } from './components/RefreshOverlay';
 import { SkeletonGrid } from './components/SkeletonGrid';
 import { Toolbar } from './components/Toolbar';
@@ -23,20 +25,32 @@ interface DiscoveryPageProps {
 }
 
 /**
- * 发现页：导航 + 操作条 + 卡片流（仓库 / 文章）+ 抓取进度 + 学习抽屉。
- * 对应原 index.html 的 <main class="wrap"> 及全局遮罩 / 抽屉。
+ * 发现页：导航 + 操作条 + 卡片流（仓库 / 文章 / 榜单）+ 抓取进度 + 学习抽屉。
+ *
+ * 【为什么榜单和卡片共用一个页面而不是新开路由】三者共用同一套导航、账号区、
+ * 抓取进度与学习抽屉，新开路由会让「切页」变成整页重挂载（抽屉关闭、滚动丢失）。
+ * 而且它们回答的是同一个问题：**现在有什么值得学** —— 卡片是随机抽样，
+ * 榜单是排名，只是同一件事的两种看法。
  */
 export function DiscoveryPage({ accountSlot }: DiscoveryPageProps) {
-  const activeTab = useDiscoveryStore((state) => state.activeTab);
+  const activeView = useDiscoveryStore((state) => state.activeView);
   const timeRange = useDiscoveryStore((state) => state.timeRange);
   const counts = useDiscoveryStore((state) => state.counts);
-  const setActiveTab = useDiscoveryStore((state) => state.setActiveTab);
+  const setActiveView = useDiscoveryStore((state) => state.setActiveView);
   const setTimeRange = useDiscoveryStore((state) => state.setTimeRange);
   const setCount = useDiscoveryStore((state) => state.setCount);
   const showToast = useToastStore((state) => state.show);
 
-  const { data, isPending, isError, error, isFetching, refetch } = useCards();
-  const { refreshing, stage, stages, run: runRefresh } = useRefreshCards();
+  // 榜单与搜索不参与卡片请求：`activeView` 是四个视图，`tab` 只是其中属于卡片池的两个。
+  // 分开类型（HomeView / CardTab）是为了让 fetchCards('ranking') 在编译期就不成立。
+  const tab: CardTab = activeView === 'repo' || activeView === 'article' ? activeView : 'repo';
+  // 两个「辅助视图」都自带刷新入口，且都不属于知识库（不参与总数角标）
+  const isAuxView = activeView === 'ranking' || activeView === 'search';
+
+  const { data, isPending, isError, error, isFetching, refetch } = useCards(tab, {
+    enabled: !isAuxView,
+  });
+  const { refreshing, progress, run: runRefresh } = useRefreshCards(tab);
   const { startLearning } = useLearningSession();
 
   const items = data?.items ?? [];
@@ -44,10 +58,10 @@ export function DiscoveryPage({ accountSlot }: DiscoveryPageProps) {
 
   // 把知识库总数回填到导航角标（未拉取过的 Tab 保持 –）
   useEffect(() => {
-    if (typeof total === 'number') {
-      setCount(activeTab, total);
+    if (!isAuxView && typeof total === 'number') {
+      setCount(tab, total);
     }
-  }, [activeTab, total, setCount]);
+  }, [isAuxView, tab, total, setCount]);
 
   const handleShuffle = useCallback(async () => {
     await refetch();
@@ -77,32 +91,49 @@ export function DiscoveryPage({ accountSlot }: DiscoveryPageProps) {
   return (
     <>
       <NavBar
-        activeTab={activeTab}
+        activeView={activeView}
         counts={counts}
-        onSwitchTab={setActiveTab}
+        onSwitchView={setActiveView}
         onShuffle={() => void handleShuffle()}
         onRefresh={() => void runRefresh()}
         shuffleDisabled={isFetching}
         refreshDisabled={refreshing}
+        actionsVisible={!isAuxView}
         accountSlot={accountSlot}
       />
 
       <main className="wrap">
-        <Toolbar activeTab={activeTab} timeRange={timeRange} onSelectRange={handleSelectRange} />
+        {activeView === 'ranking' ? (
+          <RankingPanel />
+        ) : activeView === 'search' ? (
+          <SearchPanel />
+        ) : (
+          <>
+            <Toolbar
+              activeTab={tab}
+              timeRange={timeRange}
+              onSelectRange={handleSelectRange}
+              onShuffle={() => void handleShuffle()}
+              onRefresh={() => void runRefresh()}
+              shuffleDisabled={isFetching}
+              refreshDisabled={refreshing}
+            />
 
-        {showSkeleton && <SkeletonGrid />}
-        {!isPending && !isError && hasItems && (
-          <CardGrid items={items} onStartLearning={handleStartLearning} />
+            {showSkeleton && <SkeletonGrid />}
+            {!isPending && !isError && hasItems && (
+              <CardGrid items={items} onStartLearning={handleStartLearning} />
+            )}
+            {!isPending && !isError && !hasItems && <EmptyState />}
+            {isError && <ErrorState message={errorMessage} onRetry={() => void refetch()} />}
+          </>
         )}
-        {!isPending && !isError && !hasItems && <EmptyState />}
-        {isError && <ErrorState message={errorMessage} onRetry={() => void refetch()} />}
 
         <div className={styles.footNote}>
           ILO 技术情报官 · 内容由 DeepSeek 讲解 · 通义千问摘要/向量化
         </div>
       </main>
 
-      {refreshing && <RefreshOverlay stage={stage} stages={stages} />}
+      {refreshing && <RefreshOverlay progress={progress} />}
       <LearningDrawer />
     </>
   );
