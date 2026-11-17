@@ -274,7 +274,7 @@ GitHub 的 Search API 只能按累计星数排，所以取回数据后要按 `st
 
 点任意一条会直接在**同一个抽屉里换上那张卡片**（重置会话、加载它的原文），可以 A → B → C 一路看下去，不必关掉抽屉回首页重新找。
 
-> 📸 相似项目 —— 抽屉底部折叠条，展开后给出理由与余弦相似度
+> 📸 相似项目 —— 读完「perch」的 README，抽屉底部「相似项目 5 个」展开：每条给理由 + 相似度
 >
 > <img src="docs/images/10-similar.png" alt="相似项目推荐" width="880">
 
@@ -397,6 +397,7 @@ ilo-agent-demo/
 │   ├── start_dev.py                 # 一键启动（依赖探测 → 前端 → 后端）
 │   └── requirements.txt
 ├── frontend/
+│   ├── scripts/                     # check-markdown-sanitize.mjs：HTML 白名单守卫
 │   └── src/
 │       ├── features/                # 按业务域切分，相互不 import
 │       │   ├── discovery/           # 首页、卡片、榜单、搜索、工具栏
@@ -431,6 +432,7 @@ ilo-agent-demo/
 | 首屏性能 | 候选池进程内缓存 + numpy 矩阵乘替换纯 Python 循环；`agent` 包 PEP 562 惰性导出，避免 import 就拖起 12 秒的重栈 |
 | 单端口同源 | FastAPI 直接托管前端产物并做 SPA 回退，跨域与 Cookie 问题一次性消失，部署只需一条隧道 |
 | 错误契约 | `ILOException` + 全局处理器产出 `{code, message, detail}`，路由声明 `response_model` 让错误信封进入 OpenAPI |
+| 第三方 HTML | 原文快照要渲染 README 的内联 HTML（居中块、徽章、折叠段），否则标签会被当纯文本吐出来；因此 `rehype-raw` 必须紧跟 `rehype-sanitize`（GitHub 同款白名单，`script`/`style` 整块 strip，`on*` 与 `javascript:` 清除），并由 `npm run check:sanitize` 守住这对约束 |
 
 ---
 
@@ -474,7 +476,7 @@ python -m pytest -m eval                     # 只跑 eval 门禁（会真实调
 
 `test_async_no_blocking_io.py` 专门守「异步路由里不许出现同步阻塞调用」，`test_timeout_budget.py` 顺带守住「每个配置项都必须在 `.env.example` 里出现」——这条守卫在我漏写配置文档时真的报过错。
 
-前端没有单测，只有 `tsc -b` 类型检查与 `npm run build`；界面用手动截图核对（桌面 1280 / 移动 390 两档）。
+前端没有单测，只有 `tsc -b` 类型检查、`npm run build`，以及 `npm run check:sanitize`——它跑一遍 Markdown 渲染管线，确认 README 里的内联 HTML 能被渲染、而 `script` / `on*` / `javascript:` 被清掉；界面用手动截图核对（桌面 1280 / 移动 390 两档）。
 
 ---
 

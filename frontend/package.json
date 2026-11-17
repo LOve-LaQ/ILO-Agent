@@ -7,6 +7,7 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
+    "check:sanitize": "node scripts/check-markdown-sanitize.mjs",
     "gen:api": "openapi-typescript http://127.0.0.1:8000/openapi.json -o src/shared/api/schema.d.ts"
   },
   "dependencies": {
@@ -16,6 +17,8 @@
     "react-dom": "^19.2.8",
     "react-markdown": "^10.1.0",
     "react-router-dom": "^7.18.4",
+    "rehype-raw": "^7.0.0",
+    "rehype-sanitize": "^6.0.0",
     "remark-breaks": "^4.0.0",
     "remark-gfm": "^4.0.1",
     "zustand": "^5.0.15"
@@ -25,7 +28,10 @@
     "@types/react-dom": "^19.3.0",
     "@vitejs/plugin-react": "^6.1.1",
     "openapi-typescript": "^7.13.0",
+    "remark-parse": "^11.0.0",
+    "remark-rehype": "^11.1.2",
     "typescript": "^5.9.3",
+    "unified": "^11.0.5",
     "vite": "^8.3.0"
   }
 }
