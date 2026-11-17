@@ -56,15 +56,18 @@ Redis / Qdrant     # 可选，未启动时自动降级
 # 1) 后端依赖
 cd backend && pip install -r requirements.txt
 
-# 2) 配置：至少填 DATABASE_URL 与 JWT_SECRET
+# 2) 配置：至少填 DATABASE_URL 与 JWT_SECRET，并把 SERVE_FRONTEND 置为 true
 cp .env.example .env
 
 # 3) 前端构建
 cd ../frontend && npm install && npm run build
 
 # 4) 单端口起服务：前端产物由 FastAPI 直接托管，只开 8000
-cd ../backend && SERVE_FRONTEND=true python -m uvicorn src.api.main:app --host 0.0.0.0 --port 8000
+cd ../backend && python -m uvicorn src.api.main:app --host 0.0.0.0 --port 8000
 ```
+
+> Windows PowerShell 不认 `VAR=value cmd` 这种前置写法（`SERVE_FRONTEND=true python ...` 会报「无法将 true 识别为 cmdlet」）：
+> 直接把 `SERVE_FRONTEND=true` 写进 `backend/.env`（pydantic-settings 会读），或者先 `$env:SERVE_FRONTEND='true'` 再启动。
 
 打开 http://127.0.0.1:8000 就是完整站点，`/api/v1` 与前端页面同源——没有 CORS，refresh Cookie 正常工作。
 
@@ -341,7 +344,7 @@ POST /learning/complete  归档 → 计算下次复习间隔
 
 ## API 一览
 
-共 50 个端点，全部带 `response_model`，错误统一为 `{code, message, detail}`。
+共 50 个业务端点（另有 `/health`、`/api/v1/info` 两个系统端点，以及 FastAPI 自带的 `/docs`、`/openapi.json`），全部带 `response_model`，错误统一为 `{code, message, detail}`。
 
 | 分组 | 端点 |
 |---|---|
@@ -389,7 +392,7 @@ ilo-agent-demo/
 │   │       ├── discovery/           # 抓取引擎、GitHub 榜单、知识库
 │   │       └── rag/                 # 分块、分块存储、检索、上下文注入
 │   ├── alembic/versions/            # 11 个迁移
-│   ├── tests/                       # 34 个测试文件
+│   ├── tests/                       # 37 个测试文件
 │   ├── evals/                       # 检索与对话的评测集与判分脚本
 │   ├── start_dev.py                 # 一键启动（依赖探测 → 前端 → 后端）
 │   └── requirements.txt
@@ -448,11 +451,16 @@ ilo-agent-demo/
 
 ```bash
 cd backend
-python -m pytest            # 581 项（依赖 Redis/Qdrant 的 2 项在服务未起时自动 skip）
+python -m pytest                             # 598 项通过（另有 2 项 eval 质量门禁默认 deselect）
 python -m pytest tests/test_search.py -v     # 单模块
+python -m pytest -m eval                     # 只跑 eval 门禁（会真实调用 LLM，花钱）
 ```
 
-34 个测试文件按关注点划分，不是按文件划分：
+`pytest.ini` 里的 `addopts = -m "not eval"` 把 `evals/` 的 LLM-as-judge 评测挡在默认回归之外——它是质量门禁，不是单元测试，不该每次跑测试都产生账单。
+
+598 是本机 PostgreSQL 已起、Redis / Qdrant 已起时的数字；走真实库的几个文件（`test_auth.py`、`test_authz.py`、`test_admin_flags.py` 等）在 `DATABASE_URL` 不可用时整文件 `skipif`，数量会相应变少。
+
+37 个测试文件按关注点划分，不是按文件划分：
 
 | 关注点 | 代表用例 |
 |---|---|

@@ -8,7 +8,7 @@
 # 必需安装
 Python 3.11+                  # 本项目在 Python 3.13 上开发验证
 PostgreSQL 14+                # 阶段 2 起必需：用户注册 / 登录
-Node.js 18+                   # 前端 React 工程
+Node.js 20.19+ (或 22.12+)   # Vite 8 的硬性要求，18.x 会直接启动失败
 Docker (可选，仅用于 Redis/Qdrant)
 
 # 验证
